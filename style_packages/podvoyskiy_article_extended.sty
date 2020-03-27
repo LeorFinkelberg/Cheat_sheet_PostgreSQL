@@ -33,11 +33,15 @@
 \RequirePackage{textcomp}
 % определяем пользовательские цвета
 \definecolor{mygreen}{rgb}{0,0.6,0}
-\definecolor{light-gray}{gray}{0.97}
 \definecolor{mymauve}{rgb}{0.58,0,0.82}
 \definecolor{deepblue}{rgb}{0,0,0.5}
 \definecolor{deepred}{rgb}{0.6,0.1,0}
 \definecolor{deepgreen}{rgb}{0,0.5,0}
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+%\definecolor{codepurple}{HTML}{C42043}
+%\definecolor{backcolor}{HTML}{F2F2F2}
+\definecolor{bookColor}{cmyk}{0,0,0,0.90}
 \definecolor{deeppurple}{named}{Purple}
 \RequirePackage{cmap}
 \RequirePackage{indentfirst} % отступ в первой строке абзаца
@@ -156,7 +160,9 @@
 }
 
 \RequirePackage{listings}  % для офрмления листингов программ (альтернатива, например, fancyvrb)
-\lstloadlanguages{XML,
+\lstloadlanguages{
+    XML,
+    SQL,
 	Python,
 	Fortran,
 	command.com,
@@ -198,21 +204,45 @@
 %	}
 }
 
+
+\lstdefinestyle{sql}{
+    language = SQL,
+    %backgroundcolor=\color{backcolor},   
+    commentstyle=\itshape\color{red},
+    keywordstyle=\color{blue},
+    keywords = {recursive, with, union, all, select, from, group, by, where, as, in},
+%   numberstyle=\footnotesize\color{codegray},
+    stringstyle=\itshape\color{deepgreen},
+%   basicstyle=\footnotesize,
+%   breakatwhitespace=false,         
+%   breaklines=true,                 
+%   captionpos=b,                    
+%   keepspaces=true,                 
+%   numbers=left,                    
+%   numbersep=-10pt,                  
+%   showspaces=false,                
+%   showstringspaces=false,
+%   showtabs=false,
+}
+
 % глобальные настройки подсветки синтаксиса
 \lstset{%
 	numberbychapter=true,  % нумерация листинга по номеру главы
-	basicstyle = \fontsize{10pt}{10pt}\ttfamily,  % стиль отображения базовых элементов кода, % стиль отображения базовых элементов кода
+	basicstyle = \fontsize{10pt}{10pt}\ttfamily,  % стиль отображения базовых элементов кода 
 	keepspaces = true,  % чтобы не удалялись пробелы в комментариях
 	basewidth={5pt},  % управляет шириной букв <--- NB!
 	numbers=left,  % где поставить нумерацию строк (слева\справа)
 	numberstyle=\tiny\itshape\color{gray},  % размер шрифта для номеров строк
 	stepnumber=1,  % размер шага между двумя номерами строк
 	numbersep=5pt,  % как далеко отстоят номера строк от подсвечиваемого кода
-	backgroundcolor=\color{light-gray}, % цвет фона подсветки - используем \RequirePackage{color}
+	backgroundcolor=\color{white}, % цвет фона подсветки - используем \RequirePackage{color}
 	showspaces=false,  % показывать или нет пробелы специальными отступами
 	showstringspaces=false,  % показывать или нет пробелы в строках
 	showtabs=false,  % показывать или нет табуляцию в строках
 	frame = tlBR,  % рисовать рамку вокруг кода
+    %framesep=8pt,  % межстроковый интервал
+    %xleftmargin=10pt,
+    %framexleftmargin=40pt,
 	rulesepcolor=\color{black},% создает эффект тени
 	tabsize=2,  % размер табуляции по умолчанию равен 2 пробелам
 	captionpos=t,  % позиция заголовка вверху [t] или внизу [b] 
@@ -311,5 +341,6 @@
 \newcommand{\abs}[1]{\lvert#1\rvert}
 \newcommand{\snpr}{\sigma^\text{н}_\text{пр}}
 \newcommand{\snh}{\sigma^\text{н}_\text{кц}}
+\newcommand{\psql}{\texttt{PostgreSQL}}
 
 \columnseprule=0.4pt  % рисует вертикальную черту между колонками при наборе в две колонке \documentclass[twocolumn]{article}

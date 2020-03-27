@@ -20,6 +20,137 @@
 
 \tableofcontents
 
+\section{Общие табличные выражения}
+
+Основное предназначение \texttt{SELECT} в предложении \texttt{WITH} заключается в разбиении сложных запросов на простые части. Например, пусть задана некоторая таблица \texttt{orders}\footnote{См.~документацию \psql~ \url{https://postgrespro.ru/docs/postgrespro/9.5/queries-with}}
+
+\begin{lstlisting}[
+style = sql,
+numbers = none,
+]
+WITH --part 1
+    regional_sales AS ( --def temp_table1
+        SELECT region, sum(amount) AS total_sales
+        FROM orders --base table
+        GROUP BY region
+    ),
+    top_regions AS ( --def temp_table2
+        SELECT region
+        FROM regional_sales --temp_table1
+        WHERE total_sales > (
+                    SELECT SUM(total_sales)/10
+                    FROM regional_sales --temp_table2
+        )
+    )
+SELECT --part 2
+    region,
+    product,
+    SUM(quantity) AS product_units,
+    SUM(amount) AS product_sales
+FROM orders
+WHERE region IN (
+            SELECT region
+            FROM top_regions --temp_table2
+)
+GROUP BY region, product;
+\end{lstlisting}
+
+Здесь в инструкции \texttt{WITH} объявляются две \emph{временные таблицы} \texttt{regional\_sales} и \texttt{top\_regions}. Вторая временная таблица \texttt{top\_regions} ссылается на временную таблицу \texttt{regional\_sales}, сформированную в первых строках настоящего запроса. Во второй части запроса также используется временная таблица \texttt{top\_regions}.
+
+Еще один пример. Пусть задана таблица
+\begin{lstlisting}[
+style = sql,
+numbers = none,
+]
+# SELECT * FROM test_tab;
+ id |    cae_name     |  solver  | num_cores
+  1 | ANSYS           | Direct   |        32
+  3 | Comsole         | Direct   |        16
+  4 | LMS Virtual Lab | Direct   |        32
+  2 | Nastran         | Iterativ |        16
+(4 строки)
+\end{lstlisting}
+
+Требуется выяснить сколько CAE-пакетов имеют прямой, а сколько итерационный решатель. Эту задачу можно решить следующим образом
+
+\begin{lstlisting}[
+style = sql,
+numbers = none,
+]
+WITH sub_tab AS ( --make temp table
+    SELECT solver, 1 AS count
+    FROM test_tab
+)
+SELECT solver, sum(count)
+FROM sub_tab --link to temp table
+GROUP BY solver;
+\end{lstlisting}
+
+Часть с \texttt{WITH} возвращает
+
+\begin{lstlisting}[
+style = sql,
+numbers = none,
+]
+# SELECT solver, 1 AS count FROM test_tab;
+  solver  | count
+ Direct   |     1
+ Direct   |     1
+ Direct   |     1
+ Iterativ |     1
+(4 строки)
+\end{lstlisting}
+
+Если к \texttt{WITH} добавить \texttt{RECURSIVE}, то можно будет получить доступ к промежуточному результату. Например,
+
+\begin{lstlisting}[
+style = sql,
+numbers = none,
+]
+WITH RECURSIVE tbl(n) AS ( --part 1
+    SELECT 1 --or VALUES(1). This is nonrecursive part
+    UNION ALL
+    SELECT n+1 FROM tbl WHERE n < 10  --and this is recursive part
+)
+SELECT sum(n) from tbl; --part 2
+\end{lstlisting}
+
+На первой итерации в таблице \texttt{tbl} в атрибуте \texttt{n} находится значение 1. На этом вычисления некурсивной части заканчиваются. Далее переходим к вычислениям в рекурсивной части. Таблица \texttt{tbl} ссылается на последнее вычисленное значение, поэтому на второй итерации удается выполнить \texttt{n+1}, после чего новым значением таблицы \texttt{tbl} станет 2 (\lstinline{tbl -> 2}). Проверяем условие \lstinline{n < 10}, а затем переходим к следующей итерации и т.д.
+
+Удобно представлять, что вычисленные значения хранятся в некоторой промежуточной области в порядке вычисления, а таблица \texttt{tbl} всегда ссылается на последнее вычисленное значение.
+
+На последнем этапе \texttt{1} объединяется с \texttt{2}, \texttt{3} и т.д., т.е. в итоге получается последовательность от 1 до 10. Во второй части запроса остается лишь просуммировать элементы этой последовательности и вывести на экран.
+
+Рассмотрим еще следующий пример
+
+\begin{lstlisting}[
+style = sql,
+numbers = none,
+]
+WITH RECURSIVE
+    included_parts(sub_part, part, quantity) AS (
+        SELECT --nonrecursive part
+            sub_part,
+            part,
+            quantity
+        FROM parts --base table
+        WHERE part = "our_product"
+            UNION ALL
+        SELECT --recursive part
+            p.sub_part,
+            p.part,
+            p.quantity
+        FROM included_parts pr,
+             parts p
+        WHERE p.part = pr.sub_part
+)
+SELECT sub_part, SUM(quantity) as total_quantity
+FROM included_parts
+GROUP BY sub_part
+\end{lstlisting}
+
+На первой итерации временная таблица \texttt{included\_parts}, вычисленная в некурсивной части, представляет собой результат выборки строк и столбцов из таблицы \texttt{parts}. В рекурсивной части можно получить доступ к этой таблице. В завершении выполняем выборку из таблицы \texttt{included\_parts} по столбцу \texttt{sub\_part}, группируем по нему и выводим сумму по \texttt{quantity}.
+
 
 
 % Источники в "Газовой промышленности" нумеруются по мере упоминания 

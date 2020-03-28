@@ -20,15 +20,76 @@
 
 \tableofcontents
 
-\section{Общие табличные выражения}
+\section{Смена схемы базы данных}
 
-Основное предназначение \texttt{SELECT} в предложении \texttt{WITH} заключается в разбиении сложных запросов на простые части. Например, пусть задана некоторая таблица \texttt{orders}\footnote{См.~документацию \psql~ \url{https://postgrespro.ru/docs/postgrespro/9.5/queries-with}}
+Вывести список доступных схем
 
 \begin{lstlisting}[
 style = sql,
 numbers = none,
 ]
-WITH --part 1
+SHOW search_path;
+\end{lstlisting}
+
+Задать схему 
+
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SET search_path TO new_schema;
+\end{lstlisting}
+или, если требуется доступ к нескольким схемам
+\begin{lstlisting}[
+style = sql,
+numbers = none,
+]
+SET search_path TO new_schema1, new_schema2, public;
+\end{lstlisting}
+
+\section{Обновление записей}
+
+Изменить слово Drama на Dramatic в столбце \texttt{kind} таблицы \texttt{films}
+
+\begin{lstlisting}[
+style = sql,
+numbers = none,
+]
+UPDATE films SET kind = 'Dramatic' WHERE kind = 'Drama';
+\end{lstlisting}
+
+Изменить значение температуры и сбросить уровень осадков к значению по умолчанию в одной строке таблицы \texttt{weather}
+
+\begin{lstlisting}[
+style = sql,
+numbers = none,
+deletekeywords = {date}
+]
+UPDATE
+    weather
+SET
+    temp_lo = temp_lo + 1,
+    temp_hi = temp_lo + 15,
+    prcp = DEFAULT
+WHERE
+    city = 'San Francisco' AND
+    dates = '2003-07-03';
+\end{lstlisting}
+
+
+\section{Общие табличные выражения}
+
+В конструкциях общих табличных выражений с \texttt{WITH} имена временных таблиц указываются \emph{без} перечисления имен столбцов, а в конструкциях с \texttt{WITH RECURSIVE} -- с перечислением, например, \lstinline[style=sql]{WITH RECURSIVE tab(col1, col2, ...) AS (...)}.
+
+\subsection{Оператор \texttt{WITH}}
+
+Основное предназначение \texttt{SELECT} в предложении \texttt{WITH} (Common Table Expression, Общие Табличные Выражения) заключается в разбиении сложных запросов на простые части. Например, пусть задана некоторая таблица \texttt{orders}\footnote{См.~документацию \psql~ \url{https://postgrespro.ru/docs/postgrespro/9.5/queries-with}}
+
+\begin{lstlisting}[
+style = sql,
+numbers = none,
+]
+WITH --part 1, common table expression
     regional_sales AS ( --def temp_table1
         SELECT region, sum(amount) AS total_sales
         FROM orders --base table
@@ -101,6 +162,59 @@ numbers = none,
 (4 строки)
 \end{lstlisting}
 
+Полезный пример с использованием конструкции \lstinline{CASE...END} и \lstinline{WHEN...THEN}
+
+\begin{lstlisting}[
+style = sql,
+numbers = none,
+]
+WITH cte_film AS ( --part 1
+    SELECT
+        film_id,
+        title,
+        (CASE --start block
+            WHEN length < 30 THEN 'Short'
+            WHEN length < 90 THEN 'Medium'
+            ELSE 'Long'
+         END) length
+    FROM
+        film
+)
+SELECT --part 2
+    film_id,
+    title,
+    length
+FROM
+    cte_film
+WHERE
+    length = 'Long'
+ORDER BY
+    title;
+\end{lstlisting}
+
+Пример с использованием логических операторов
+
+\begin{lstlisting}[
+style = sql,
+numbers = none,
+]
+WITH cte_films AS (
+    SELECT
+        film_id,
+        title,
+        (CASE
+            WHEN length < 30 THEN 'Short'
+            WHEN length >= 30 AND length < 90 THEN 'Medium'
+            WHEN length > 90 THEN 'Long'
+        END) length
+    FROM
+        film
+)
+
+\end{lstlisting}
+
+\subsection{Оператор \texttt{WITH RECURSIVE}}
+
 Если к \texttt{WITH} добавить \texttt{RECURSIVE}, то можно будет получить доступ к промежуточному результату. Например,
 
 \begin{lstlisting}[
@@ -121,7 +235,7 @@ SELECT sum(n) from tbl; --part 2
 
 На последнем этапе \texttt{1} объединяется с \texttt{2}, \texttt{3} и т.д., т.е. в итоге получается последовательность от 1 до 10. Во второй части запроса остается лишь просуммировать элементы этой последовательности и вывести на экран.
 
-Рассмотрим еще следующий пример
+Рассмотрим еще такой пример
 
 \begin{lstlisting}[
 style = sql,
@@ -140,8 +254,9 @@ WITH RECURSIVE
             p.sub_part,
             p.part,
             p.quantity
-        FROM included_parts pr,
-             parts p
+        FROM
+            included_parts pr,
+            parts p
         WHERE p.part = pr.sub_part
 )
 SELECT sub_part, SUM(quantity) as total_quantity
@@ -151,6 +266,29 @@ GROUP BY sub_part
 
 На первой итерации временная таблица \texttt{included\_parts}, вычисленная в некурсивной части, представляет собой результат выборки строк и столбцов из таблицы \texttt{parts}. В рекурсивной части можно получить доступ к этой таблице. В завершении выполняем выборку из таблицы \texttt{included\_parts} по столбцу \texttt{sub\_part}, группируем по нему и выводим сумму по \texttt{quantity}.
 
+\subsection{Изменение данных в \texttt{WITH}}
+
+В предложении \texttt{WITH} можно также использовать операторы, изменяющие данные (\texttt{INSERT}, \texttt{UPDATE} или \texttt{DELETE}). Это позволяет выполнять в одном запросе сразу несколько разных операций. Например
+
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+WITH moved_rows AS (
+    DELETE FROM products
+    WHERE
+        dates >= '2010-10-01' AND
+        dates < '2010-11-01'
+    RETURNING *
+)
+INSERT INTO products_log (SELECT * FROM moved_rows);
+\end{lstlisting}
+
+Этот запрос фактически перемещает строки из таблицы \texttt{products} в таблицу \texttt{products\_log}. Оператор \texttt{DELETE} удаляет указанные строки из \texttt{products} и возвращает их содержимое в предложении \texttt{RETURNING}, а затем главный запрос читает это содержимое и вставляет в таблицу \texttt{products\_log}.
+
+\section{Приемы работы в \texttt{pgAdmin 4}}
+
+\section{Приемы работы в \texttt{psql}}
 
 
 % Источники в "Газовой промышленности" нумеруются по мере упоминания 

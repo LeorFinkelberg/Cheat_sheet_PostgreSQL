@@ -20,6 +20,40 @@
 
 \tableofcontents
 
+\section{Логический порядок обработки инструкции \texttt{SELECT}}
+
+Порядок обработки инструкции \texttt{SELECT} определяет, когда объекты, определенные в одном шаге, становятся доступными для предложений в последующих шагах. Например, если обработчик запросов можно привязать к таблицам или представлениям, определенным в предложении \texttt{FROM}, эти объекты и их столбцы становятся доступными для всех последующих шагов.
+
+Общая процедура выполнения \texttt{SELECT} следущая (подробности см. в документации~\href{https://postgrespro.ru/docs/postgresql/9.5/sql-select}{\texttt{SELECT}}):
+
+\begin{enumerate}
+	\item \texttt{WITH}: выполняются все запросы в списке \texttt{WITH}; по сути они формируют временные таблицы, к которым затем можно обращаться в списке \texttt{FROM}; запрос в \texttt{WITH} выполняется только один раз, даже если он фигурирует в списке \texttt{FROM} неоднократно,
+	
+	\item \texttt{FROM}: вычисляются все элементы в списке \texttt{FROM} (каждый элемент в списке \texttt{FROM} представляет собой реальную или виртуальную таблицу); другими словами конструируются таблицы из списка \texttt{FROM},
+	
+	\item \texttt{ON}: выбираются строки, удовлетворяющие заданному условию,
+	
+	\item \texttt{JOIN}: выполняется объединение таблиц,
+	
+	\item \texttt{WHERE}: исключаются строки, не удовлетворяющие заданному условию,
+	
+	\item \texttt{GROUP BY}: вывод разделяется по группам строк, соответствующим одному или нескольким значениям, а затем вычисляются результаты агрегатных функций,
+	
+	\item \texttt{HAVING}: исключаются группы, не удовлетворяющие заданному условию,
+	
+	\item \texttt{SELECT},
+	
+	\item \texttt{DISTINCT}: исключаются \emph{повторяющиеся} строки; \texttt{SELECT DISTINCT ON} исключает строки, совпадающие по всем указанным выражениям; \texttt{SELECT ALL} (по умолчанию) возвращает все строки результата, включая дубликаты,
+	
+	\item \texttt{UNION}, \texttt{INTERSECT} и \texttt{EXCEPT}: объединяется вывод нескольких команд \texttt{SELECT} в один результирующий набор.
+	
+	\item \texttt{ORDER BY}: строки сортируются в указанном порядке; в отсутствие \texttt{ORDER BY} строки возвращаются в том порядке, в каком системе будет проще их выдавать,
+	
+	\item \texttt{LIMIT} (или \texttt{FETCH FIRST}), либо \texttt{OFFSET}: возвращается только подмножество строк результата.
+	
+	\item Если указано \texttt{FOR UPDATE}, \texttt{FOR NO KEY UPDATE}, \texttt{FOR SHARE} или \texttt{FOR KEY SHARE}, оператор \texttt{SELECT} блокирует выбранные строки, защищая их от одновременных изменений.
+\end{enumerate}
+
 \section{Смена схемы базы данных}
 
 Вывести список доступных схем
@@ -154,7 +188,8 @@ style = sql,
 numbers = none,
 ]
 # SELECT solver, 1 AS count FROM test_tab;
-  solver  | count
+ solver   | count
+=================
  Direct   |     1
  Direct   |     1
  Direct   |     1
@@ -259,12 +294,120 @@ WITH RECURSIVE
             parts p
         WHERE p.part = pr.sub_part
 )
-SELECT sub_part, SUM(quantity) as total_quantity
+SELECT sub_part, SUM(quantity) AS total_quantity
 FROM included_parts
 GROUP BY sub_part
 \end{lstlisting}
 
 На первой итерации временная таблица \texttt{included\_parts}, вычисленная в некурсивной части, представляет собой результат выборки строк и столбцов из таблицы \texttt{parts}. В рекурсивной части можно получить доступ к этой таблице. В завершении выполняем выборку из таблицы \texttt{included\_parts} по столбцу \texttt{sub\_part}, группируем по нему и выводим сумму по \texttt{quantity}.
+
+Еще один полезный пример. Пусть дана таблица сотрудников
+
+\begin{lstlisting}[
+title = {\sffamily employees},
+numbers = none]
+id | name   | salary | job              | manager_id
+====================================================
+1  | John   | 10000  | CEO              | null
+2  | Ben    | 1400   | Junior Developer | 5
+3  | Barry  | 500    | Intern           | 5
+4  | George | 1800   | Developer        | 5
+5  | James  | 3000   | Manager          | 7
+6  | Steven | 2400   | DevOps Engineer  | 7
+7  | Alice  | 4200   | VP               | 1
+8  | Jerry  | 3500   | Manager          | 1
+9  | Adam   | 2000   | Data Analyst     | 8
+10 | Grace  | 2500   | Developer        | 8
+11 | Leor   | 5000   | Data Scientist   | 6
+\end{lstlisting}
+
+Выведем иерархию подчинения сотрудников в компании
+
+\begin{lstlisting}[
+style = sql,
+numbers = none,
+]
+WITH RECURSIVE managers(id, name, manager_id, job, level) AS (
+    SELECT id, name, manager_id, job, 1
+    FROM employees --base table
+    WHERE id = 7
+        UNION ALL
+    SELECT e.id, e.name, e.manager_id, e.job, m.level+1
+    FROM employees e JOIN managers m ON e.manager_id = m.id
+)
+SELECT * FROM managers;
+\end{lstlisting}
+
+Сначала в \emph{некурсивной} части \texttt{WITH RECURSIVE} объявляется временная таблица \texttt{managers(id, name, ...)}. Она строится на базе таблицы \texttt{employees}, к которой слева добавляется столбец, состоящий из одних единиц. Затем выбираются строки, удовлетворяющие условию \texttt{WHERE}; в данном случае это одна строка \texttt{e.manager\_id=m.id}.
+
+И, таким образом, на данном этапе во \emph{временную} таблицу \texttt{managers} попадет только одна строка
+\begin{lstlisting}[
+style = sql,
+title = {\sffamily managers, вычисленная в нерекурсивной части},
+numbers = none
+]
+id | name   | manager_id | job              | level
+========================================================
+7  | Alice  | 1          | VP               | 1
+\end{lstlisting}
+
+Переходим в рекурсивную часть CTE. Из базовой таблицы \texttt{employees} выбираем те строки, которые в столбце \texttt{manager\_id} имеют те же значения, что и в столбце \texttt{id} временной таблицы \texttt{managers} (на данном этапе таблица состоит из одной строки). Другими словами, выбрать нужно те строки, у которых в столбце \texttt{manager\_id} таблицы \texttt{employees} стоит цифра 7.
+
+В результате временная таблица \texttt{managers} на текущем этапе будет иметь вид
+
+\begin{lstlisting}[
+style = sql,
+title = {\sffamily managers, вычисленная в рекурсивной части},
+numbers = none
+]
+id | name   | manager_id | job              | level
+========================================================
+5  | James  | 7          | Manager          | 2
+6  | Steven | 7          | DevOps Engineer  | 2
+\end{lstlisting}
+
+Временные таблицы \emph{рекурсивных общих табличных выражений} всегда ссылаются на результат последних вычислений, т.е. на данном этапе временная таблица \texttt{managers} ссылается на таблицу, состоящую из двух строк.
+
+Теперь мы снова выбираем из базовой таблицы \texttt{employees} и временной таблицы те строки, у которых в столбцах \texttt{e.manager\_id} и \texttt{m.id} стоят одинаковые числа (в данном случае 5 и 6).
+
+Таким образом
+
+\begin{lstlisting}[
+style = sql,
+title = {\sffamily managers, вычисленная в рекурсивной части на 2-ой итерации},
+numbers = none
+]
+id | name   | manager_id | job              | level
+========================================================
+2  | Ben    | 5          | Junior Developer | 3
+3  | Barry  | 5          | Intern           | 3
+4  | George | 5          | Developer        | 3 
+11 | Leor   | 6          | Data Scientist   | 3 
+\end{lstlisting}
+
+
+Наконец все временные подтаблицы <<склеиваются>> и конструкция \lstinline[style = sql]{SELECT * FROM managers} возвращает таблицу \texttt{managers}
+
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+id | name   | manager_id | job              | level
+========================================================
+7  | Alice  | 1          | VP               | 1 --step 1
+--------------------------------------------------------
+5  | James  | 7          | Manager          | 2 --step 2
+6  | Steven | 7          | DevOps Engineer  | 2 --step 2
+--------------------------------------------------------
+2  | Ben    | 5          | Junior Developer | 3 --step 3
+3  | Barry  | 5          | Intern           | 3 --step 3
+4  | George | 5          | Developer        | 3 --step 3
+11 | Leor   | 6          | Data Scientist   | 3 --step 3
+\end{lstlisting}
+
+
+
+
 
 \subsection{Изменение данных в \texttt{WITH}}
 
@@ -284,7 +427,7 @@ WITH moved_rows AS (
 INSERT INTO products_log (SELECT * FROM moved_rows);
 \end{lstlisting}
 
-Этот запрос фактически перемещает строки из таблицы \texttt{products} в таблицу \texttt{products\_log}. Оператор \texttt{DELETE} удаляет указанные строки из \texttt{products} и возвращает их содержимое в предложении \texttt{RETURNING}, а затем главный запрос читает это содержимое и вставляет в таблицу \texttt{products\_log}.
+Этот запрос фактически перемещает строки из таблицы \texttt{products} в таблицу \texttt{products\_log} (таблица должна уже существовать на момент выполнения запроса). Оператор \texttt{DELETE} удаляет указанные строки из \texttt{products} и возвращает их содержимое в предложении \texttt{RETURNING}, а затем главный запрос читает это содержимое и вставляет в таблицу \texttt{products\_log}.
 
 \section{Приемы работы в \texttt{pgAdmin 4}}
 

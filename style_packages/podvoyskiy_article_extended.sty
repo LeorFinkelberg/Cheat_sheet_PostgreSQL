@@ -31,6 +31,30 @@
 \RequirePackage{color}
 \RequirePackage{colortbl}  % настраивает цвет таблицы
 \RequirePackage{textcomp}
+% --------- MAC APPLE ---------
+\RequirePackage{menukeys}  % для спецсимволов mac
+\tikzset{tw@shadowedangularkeys@base/.style={%
+	tw@set@tikz@colors,
+	inner sep=0pt,
+	inner xsep=2pt,
+	text height=1.825ex,
+	text depth=0.7ex,
+	minimum width=1.5em,
+	font=\relsize{-1}\itshape,
+	general shadow={%
+	shadow xshift=.2ex, shadow yshift=-.15ex,
+	fill=\usemenucolor{c},
+		},
+	}
+}
+\renewmenumacro{\menu}[>]{angularmenus} % default: menus
+%\renewmenumacro{\directory}[>]{hyphenatepathswithfolder} % default: paths
+\renewmenumacro{\directory}[>]{pathswithblackfolder} % default: paths, pathswithblackfolder
+\renewmenumacro{\keys}{shadowedangularkeys} % default: roundedkeys
+\changemenucolor{gray}{br}{named}{black}  % border
+\changemenucolor{gray}{bg}{named}{deepblue}  % background
+%\changemenucolor{gray}{txt}{named}{blue}  % text
+% --------- MAC APPLE ---------
 % определяем пользовательские цвета
 \definecolor{mygreen}{rgb}{0,0.6,0}
 \definecolor{mymauve}{rgb}{0.58,0,0.82}
@@ -210,9 +234,12 @@
     %backgroundcolor=\color{backcolor},   
     commentstyle=\itshape\color{red},
     keywordstyle=\color{blue},
-    keywords = {like, for, similar, recursive, with, union, all, select, from, group, by, where, as, in,
+    keywords = {copy, delimiter, like, for, similar, recursive, with, union, all,
+	            select, from, group, by, where, as, in, stdin, stdout, program, format,
+				oids, freeze, null, header, escape, force_quote, force_not_null,
+				force_null, encoding, quote, create, table, primary, key, references,
                 when, else, then, case, end, order, update, set, show, to, and, delete,
-                insert, into, returning, join, on},
+                insert, into, returning, join, on, not, text, check},
 %   numberstyle=\footnotesize\color{codegray},
     stringstyle=\itshape\color{deepgreen},
 %   basicstyle=\footnotesize,

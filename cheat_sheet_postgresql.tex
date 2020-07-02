@@ -9,7 +9,7 @@
 
 
 \begin{document}
-\title{Наиболее полезные конструкции PostgreSQL}
+\title{Сборник заметок\\по наиболее полезным конструкциям PostgreSQL}
 
 \author{}
 
@@ -19,6 +19,41 @@
 \thispagestyle{fancy}
 
 \tableofcontents
+
+\section{Общие сведения}
+
+\section{Сброс пароля для \texttt{psql} и \texttt{pgAdmin4}}
+
+Для того чтобы доступ к базам данных через терминальный клиент \texttt{psql} или через web-интерфейс \texttt{pgAdmin4} можно было выполнять без ввода пароля, нужно сделать следующее:
+\begin{itemize}
+	\item найти файл \texttt{pg\_hba.conf}; на ОС Windows он располагается по адресу \directory{C: > Program Files > PostgreSQL > 11 > data},
+	
+	\item заменить в этом файле метод \texttt{md5} (в нижней части файла) на \texttt{trust}.
+\end{itemize}
+
+После исправлений файл \texttt{pg\_hba.conf} должен выглядеть приблизительно так
+\begin{lstlisting}[
+title = {\sffamily pg\_hba.conf},
+style = cmd,
+numbers = none
+]
+...
+# TYPE  DATABASE        USER            ADDRESS                 METHOD
+
+# IPv4 local connections:
+host    all             all             127.0.0.1/32            trust
+host    all             all             0.0.0.0/0               trust
+# IPv6 local connections:
+host    all             all             ::1/128                 trust
+host    all             all             ::0/0                   trust
+# Allow replication connections from localhost, by a user with the
+# replication privilege.
+host    replication     all             127.0.0.1/32            trust
+host    replication     all             ::1/128                 trust
+host    appdb           app             all                     trust
+
+\end{lstlisting}
+
 
 \section{Логический порядок обработки инструкции \texttt{SELECT}}
 
@@ -81,7 +116,113 @@ numbers = none,
 SET search_path TO new_schema1, new_schema2, public;
 \end{lstlisting}
 
-\section{Обновление записей}
+\section{Создание таблицы}
+
+\subsection{Базовые синтаксис создания таблицы}
+
+Для создания таблиц в языке SQL служит команда \texttt{CREATE TABLE}. Упрощенный синтаксис таков
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+CREATE TABLE table_name(
+    field_name data_type [constraint],
+    field_name data_type [constraint],
+    ...
+    [constraint],
+    [primary key],
+    [foreign key]
+);
+\end{lstlisting}
+
+Пример
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+CREATE TABLE aircrafts(
+    aircraft_code CHAR(3) NOT NULL,
+    model TEXT NOT NULL,
+    range INTEGER NOT NULL,
+    CHECK (range > 0),           -- ограничение
+    PRIMARY KEY (aircraft_code)  -- первичный ключ
+);
+\end{lstlisting}
+
+\subsection{Создать таблицу по образу другой таблицы}
+
+Создать таблицу со структурой данных, аналогичной другой таблице (но \emph{без} ограничений базовой таблицы) можно так
+\begin{lstlisting}[
+style = sql,
+numbers = none,
+]
+CREATE TABLE tbl_name AS
+    SELECT * FROM base_tbl LIMIT 0;
+\end{lstlisting}  
+или более короткий вариант
+\begin{lstlisting}[
+style = sql,
+numbers = none,
+]
+CREATE TABLE tbl_name(LIKE base_tbl);
+\end{lstlisting}
+
+\section{Копирование данных между файлом и таблицей}
+
+Скопировать данные из внешнего файла в таблицу (по сути загрузить данные) можно с помощью команды \texttt{COPY}. С помощью этой же команды можно записать данные из таблицы в файл.
+
+Общий синтаксис команды выглядит так
+\begin{lstlisting}[
+style = sql,
+numbers = none,
+]
+-- копирует содержимое файла в таблицу
+COPY имя_таблицы [ ( имя_столбца [, ...] ) ]
+    FROM { 'имя_файла' | PROGRAM 'команда' | STDIN }
+    [ [ WITH ] ( параметр [, ...] ) ]
+
+-- копирует содрежимое таблицы в файл
+COPY { имя_таблицы [ ( имя_столбца [, ...] ) ] | ( запрос ) }
+    TO { 'имя_файла' | PROGRAM 'команда' | STDOUT }
+    [ [ WITH ] ( параметр [, ...] ) ]
+\end{lstlisting}
+
+Здесь допускается \texttt{параметр}:
+\begin{lstlisting}[
+style = sql,
+numbers = none,
+]
+FORMAT имя_формата
+OIDS [ boolean ]
+FREEZE [ boolean ]
+DELIMITER 'символ_разделитель'
+NULL 'маркер_NULL'
+HEADER [ boolean ]
+QUOTE 'символ_кавычек'
+ESCAPE 'символ_экранирования'
+FORCE_QUOTE { ( имя_столбца [, ...] ) | * }
+FORCE_NOT_NULL ( имя_столбца [, ...] )
+FORCE_NULL ( имя_столбца [, ...] )
+ENCODING 'имя_кодировки'
+\end{lstlisting}
+
+Примеры
+\begin{lstlisting}[
+style = sql,
+numbers = none,
+]
+-- сохранить данные из таблицы `family` в файл `family.csv`
+postgres=# COPY family TO 'E:/[WorkDirectory]/GARBAGE/family.csv' DELIMITER ',';
+
+-- загрузить в таблицу `family` данные из файла `family.csv`
+postgres=# CREATE TABLE family (
+               person TEXT PRIMARY KEY,
+               parent TEXT REFERENCES family  -- создать внешний ключ на person
+           );
+postgres=# COPY family FROM 'E:/[WorkDirectory]/GARBAGE/family.csv' DELIMITER ',';
+\end{lstlisting}
+
+\section{Обновление записей. Команда \texttt{UPDATE}}
 
 Изменить слово Drama на Dramatic в столбце \texttt{kind} таблицы \texttt{films}
 
@@ -115,7 +256,7 @@ WHERE
 
 В конструкциях общих табличных выражений с \texttt{WITH} имена временных таблиц указываются \emph{без} перечисления имен столбцов, а в конструкциях с \texttt{WITH RECURSIVE} -- с перечислением, например, \lstinline[style=sql]{WITH RECURSIVE tab(col1, col2, ...) AS (...)}.
 
-\subsection{Оператор \texttt{WITH}}
+\subsection{Конструкция \texttt{WITH}}
 
 Основное предназначение \texttt{SELECT} в предложении \texttt{WITH} (Common Table Expression, Общие Табличные Выражения) заключается в разбиении сложных запросов на простые части. Например, пусть задана некоторая таблица \texttt{orders}\footnote{См.~документацию \psql~ \url{https://postgrespro.ru/docs/postgrespro/9.5/queries-with}}
 
@@ -248,7 +389,7 @@ WITH cte_films AS (
 
 \end{lstlisting}
 
-\subsection{Оператор \texttt{WITH RECURSIVE}}
+\subsection{Конструкция \texttt{WITH RECURSIVE}}
 
 Если к \texttt{WITH} добавить \texttt{RECURSIVE}, то можно будет получить доступ к промежуточному результату. Например,
 
@@ -587,6 +728,197 @@ SELECT substring('xy1234z', 'y*?(\d{1,3})');  -- вернет '1'
 \section{Приемы работы в \texttt{pgAdmin 4}}
 
 \section{Приемы работы в \texttt{psql}}
+
+\texttt{psql} -- это терминальный клиент для раоботы с PostgreSQL. Утилита \texttt{psql} предоставляет ряд метакоманд и различные возможности, подобные тем, что имеются у командных оболочек, для облегчения написания скриптов и автоматизации широкого спектра задач.
+
+\subsection{Конфигурационный файл}
+
+Поведением интерактивного терминала \texttt{psql} можно управлять с помощью конфигурационного файла \verb|~/.psqlrc|. На ОС Windows этот файл располагается по адресу \directory{C: > Users > ADM > AppData > Roaming > postgresql} и называется \verb|psqlrc.conf|.
+
+Конфигурационный файл утилиты \texttt{psql} может включать следующие настройки
+\begin{lstlisting}[
+style = cmd,
+title = {\sffamily psqlrc.conf},
+numbers = none
+]
+\set QUIET 1
+\timing
+\pset border 2
+\pset null <NULL>
+\set ON_ERROR_STOP on
+\setenv PSQL_EDITOR "C:\Program Files\Git\usr\bin\vim.exe"
+\set VERBOSITY verbose
+\set QUITE 0
+\end{lstlisting}
+
+\subsection{Метакоманды \texttt{psql}}
+
+\noindent \verb|\c| или \verb|\connect|: устанавливает новое подключение к серверу PostgreSQL. Параметры подключения можно указывать как позиционно, так и передавая аргумент.
+
+Например
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+=> \c "host=localhost port=5432 dbname=mydb connect_timeout=10 sslmode=disable"
+=> \c postgresql://tom@localhost/mydb?application_name=myapp
+\end{lstlisting}
+
+\noindent \verb|\cd|: сменяет текущий рабочий каталог на заданный. Без аргументов устанавливает домашний каталог пользователя.
+
+\noindent \verb|\conninfo|: выводит информацию о текущем подключении к базе данных.
+
+\noindent \verb|\copy|: производит копирование данных с участием клиента. При этом выполнятся SQL-команда \texttt{COPY}, но вместо чтения или записи в файл на сервере, \texttt{psql} читает или записывает файл и пересылает данные между сервером и локальной файловой системой. Это означает, что для доступа к файлам используются привелегии локального пользователя, а не сервера, и не требуются привелегии суперпользователя SQL. Синтаксис команды похож на синтаксис SQL-команды \texttt{COPY}. Все параметры, кроме источника и получателя данных, соответствуют параметрам \texttt{COPY}. Альтернативный способ получить тот же результат, что и с \verb|\copy ... to| -- использовать SQL-команду \texttt{COPY ... TO STDOUT} и завершить ее командой \verb|\g name|.
+
+\noindent \verb|\d[S+]|: для каждого отношения (таблицы, представления, материализованного представления, индекса, последовательности, внешней таблицы) или составного типа, соответствующих шаблону, показывает все столбцы, их типы, табличное пространство и любые специальные атрибуты, такие как \texttt{NOT NULL} или значения по умолчанию. Также показываются связанные индексы, ограничения, правила и триггеры.
+
+\noindent\verb|\da[S]|: выводит список агрегатных функций вместе с типом возвращаемого значения и типами данных, которыми они оперируют.
+
+\noindent\verb|\dD[S+]|: выводит список доменов.
+
+\noindent\verb|\dL[S+]|: выводит список процедурных языков.
+
+\noindent\verb|\dn[S+]|: выводит список схем (пространств имен).
+
+\noindent\verb|\enconding|: устанавливает кодировку набора символов на клиенте. Без аргументов команда показывает текущую кодировку.
+
+\noindent\verb|\!|: выполняет команду операционной системы.
+
+
+
+\subsection{Примеры использования}
+
+Вывести список таблиц, присутствующих в базе данных \texttt{postgres}, предварительно задав кодовую страницу, соответствующую Windows-кодировке
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+$ psql -U postgtes -d postgres -c '\! chcp 1251' -c '\d'
+\end{lstlisting}
+
+Вывести первые 5 строк таблицы \texttt{aircrafts} из базы данных \texttt{demo}, организовав вывод строк в вертикальном формате (\verb|\x|; эквивалентно ключу \texttt{ psql} \verb|-x|)
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+$ psql -U postgtes -d demo -c '\x' -c 'TABLE aircrafts LIMIT 5;'
+\end{lstlisting}
+
+\remark{%
+Лучше для нескольких команд использовать несколько ключей \texttt{-c}
+}
+
+Прочить команды из файла \texttt{sql\_query.sql}, а не из стандартного ввода. По большому счету ключ \texttt{-f} равнозначен метакоманде \verb|\i|
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+$ psql -U postgtes -f sql_query.sql
+\end{lstlisting}
+
+Вывести первые 3 строки таблицы в HTML-формате (\texttt{-H})
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+$ psql -U postgres -d postgres -H -c '\! chcp 1251' -c 'table family limit 3;'
+\end{lstlisting}
+
+Записать вывод результатов всех запросов в файл с именем \texttt{psql\_output.txt}
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+$ psql -U postgres -d postgres -H -c '\! chcp 1251' -c 'table family limit 3;' \
+    -o psql_output.txt
+\end{lstlisting}
+
+Вывести таблицу в формате \LaTeX\ и вывод запроса записать в файл \texttt{for\_latex\_output.txt}
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+$ psql -U postgres -d postgres -P format=latex \
+    -c '\! chcp 1251' -c 'table family limit 3;' \
+    -o for_latex_output.txt
+\end{lstlisting}
+
+\section{Функции, возвращающие множества}
+
+\subsection{Функции, генерирующие ряды значений}
+
+Очень полезна бывает функция \texttt{generate\_series(start, stop, step)}, которая возвращает последовательность в общем случае вещественных чисел от \emph{start} до \emph{stop} с заданным шагом \emph{step}
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT generate_series(1.1, 4, 1.3) AS real_num;
+\end{lstlisting}
+выведет
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
++----------+
+| real_num |
++----------+
+|      1.1 |
+|      2.4 |
+|      3.7 |
++----------+
+(3 строки)
+\end{lstlisting}
+
+Сгенерировать несколько временных меток с шагом в 5 часов
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT generate_series('2020-05-01 00:00'::timestamp,
+                       '2020-05-01 22:00'::timestamp,
+                       '5 hours'::interval) AS dates;
+\end{lstlisting}
+выведет
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
++---------------------+
+|        dates        |
++---------------------+
+| 2020-05-01 00:00:00 |
+| 2020-05-01 05:00:00 |
+| 2020-05-01 10:00:00 |
+| 2020-05-01 15:00:00 |
+| 2020-05-01 20:00:00 |
++---------------------+
+(5 строк)
+\end{lstlisting}
+
+Когда после функции в предложении \texttt{FROM} добавляется \texttt{WITH ORDINALITY}, в выходные данные добавляется столбец типа \texttt{bigint}, числа в котором начинаются с 1 и увеличиваются на 1 для каждой строки, выданной функцией. Пример
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT * FROM pg_ls_dir('.') WITH ORDINALITY AS t(ls, n) LIMIT 5;
+\end{lstlisting}
+выведет
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
++------------------+---+
+|        ls        | n |
++------------------+---+
+| base             | 1 |
+| current_logfiles | 2 |
+| global           | 3 |
+| log              | 4 |
+| pg_commit_ts     | 5 |
++------------------+---+
+\end{lstlisting}
+
+
 
 
 % Источники в "Газовой промышленности" нумеруются по мере упоминания 

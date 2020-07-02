@@ -845,6 +845,19 @@ $ psql -U postgres -d postgres -P format=latex \
 
 \section{Функции, возвращающие множества}
 
+\subsection{Предикаты \texttt{ANY}, \texttt{ALL}}
+
+Использование \texttt{IN} эквивалентно \texttt{= ANY}, а использование \texttt{NOT IN} эквивалентно \texttt{<> ALL}. Пример
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+-- есть ли совпадение хотя бы с одним элементом массива?
+SELECT 'test'::text = ANY('{"test","non-test"}'::text[]); -- true
+-- есть ли совпадение со всеми элементами массива?
+SELECT 'test'::text = ALL('{"test","non-test"}'::text[]); -- false
+\end{lstlisting}
+
 \subsection{Функции, генерирующие ряды значений}
 
 Очень полезна бывает функция \texttt{generate\_series(start, stop, step)}, которая возвращает последовательность в общем случае вещественных чисел от \emph{start} до \emph{stop} с заданным шагом \emph{step}

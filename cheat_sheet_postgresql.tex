@@ -280,6 +280,168 @@ WHERE pname IS NULL;
 
 Употреблять \texttt{LATERAL} с функциями, возвращающими множества, нет необходимости. Все функции, упомянутые во фразе \texttt{FROM}, и так могут использовать результаты любых предшествующих функций или подзапросов.
 
+\subsection{Дополнительные средства группировки}
+
+Базы данных часто служат источником данных для различных отчетов. А в отчетах принято в одной и той же таблице показывать подытоги, итоги и общие итоги, подразумевающие группировку и агрегирование. Рассмотрим отчет о количестве объявлений в разрезе марок и кварталов, в котором требуется также показать итоги по каждому кварталу (суммарно по всем маркам) и общий итог. Вот как отбираются данные для такого отчета
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT
+    to_char(advertisement_date, 'YYYY-Q') AS quarter,
+    make,
+    count(*)
+FROM advertisement a
+    INNER JOIN car c ON a.car_id = c.car_id
+    INNER JOIN car_model m ON m.car_model_id = c.car_model_id
+GROUP BY quarter, make;
+\end{lstlisting}
+выведет
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
+quarter | make    | count
+--------+---------+------
+2014-4  | Peugeot |    12
+2014-2  | Daewoo  |     8
+2014-4  | Skoda   |     5
+... 
+\end{lstlisting}
+
+Чтобы вычислить итоги, понадобятся дополнительные запросы
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT to_char(advertisement_date, 'YYYY-Q') AS quarter, count(*)
+FROM advertisement a
+    INNER JOIN car c ON a.car_id = c.car_id
+    INNER JOIN car_model m ON m.car_model_id = c.car_model_id
+GROUP BY quarter;
+
+SELECT count(*)
+FROM advertisement a
+    INNER JOIN car c ON a.car_id = c.car_id
+    INNER JOIN car_model m ON m.car_model_id = c.car_model_id;
+\end{lstlisting}
+
+PostgreSQL позволяет объединить все три запроса в один с помощью специальной конструкции \texttt{GROUP BY GROUPING SETS}
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT
+    to_char(advertisement_date, 'YYYY-Q') AS quarter,
+    make,
+    count(*)
+FROM advertisement a
+    INNER JOIN car c ON a.car_id = c.car_id
+    INNER JOIN car_model m ON m.car_model_id = c.car_model_id
+GROUP BY GROUPING SETS ((quarter, make), (quarter), ()) -- << NB
+ORDER BY quarter NULLS LAST, make NULLS LAST;
+\end{lstlisting}
+
+Благодаря конструкции \texttt{GROUPING SETS ((quarter, make), (quarter), ())} запрос работает как \texttt{UNION ALL} одинаковых запросов с разными фразами \texttt{GROUP BY}:
+\begin{itemize}
+	\item \texttt{GROUP BY quarter, make},
+	
+	\item \texttt{GROUP BY} -- здесь поле \texttt{make} будет иметь значение \texttt{NULL},
+	
+	\item все строки помещаются в одну группу, оба поля -- \texttt{quarter} и \texttt{make} -- будут иметь значение \texttt{NULL}.
+\end{itemize}
+
+Вообще говоря, фраза \texttt{GROUP BY} принимает не только выражения, но и группирующие элементы, которые могут быть выражениями или конструкциями типа \texttt{GROUPING SETS}.
+
+Два других группирующих элемента -- \texttt{ROLLUP} и \texttt{CUBE}
+\begin{itemize}
+	\item \texttt{ROLLUP (a, b, c)} эквивалентно \texttt{GROUPING SETS ((a, b, c), (a, b), (c), ())}.
+	
+	\item \texttt{CUBE (a, b, c)} эквивалентно \texttt{GROUPING SETS ((a, b, c), (a, b), (a, c), (b, c), (a), (b), (c), ())} -- все возможные комбинации аргументов.
+\end{itemize}
+
+Разрешено также комбинировать различные группирующие элементы в одной фразе \texttt{GROUP BY}, например: \texttt{GROUP BY a, CUBE (b, c)} -- по сути дела, комбинация группирующих элементов.
+
+\subsection{Дополнительные виды агрегирования}
+
+Есть несколько агрегатных функций, которые выполняются специальным образом. Первая группа таких функций называется \textit{агрегатами по упорядоченному множеству}. Они учитывают не только значения выражений, переданных в качестве аргументов, но и их порядок.
+
+PostgreSQL позволяет вычислить непрерывный или дискретный процентиль с помощью функций \texttt{percentile\_cont} и \texttt{percentile\_disc} соответственно.
+
+Дискретный процентиль совпадает с одним из значений группы, а непрерывный -- результат интерполяции двух существующих значений. Есть возможность вычислить один процентиль для заданной процентной доли или сразу несколько процентилей для заданного массива долей.
+
+Вот, например, запрос о распределении количества объявлений по автомобилям
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT percentile_disc('{0.25, 0.5, 0.75}'::real[]) WITHIN GROUP (ORDER BY range)
+FROM aircrafts;
+\end{lstlisting}
+выведет
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
++------------------+
+| percentile_disc  |
++------------------+
+| {3000,5600,6700} |
++------------------+
+\end{lstlisting}
+
+Результат означает, что для 25 процентов наблюдений \emph{не превосходят} 3000, 50 процентов -- 5600, а 75 процентов -- 6700.
+
+Синтаксис агрегатных функций по упорядоченному множеству отличается от обычных агрегатных функций, в нем используется специальная конструкция \texttt{WITHIN GROUP (ORDER BY expression)}. Здесь выражение \texttt{expression} -- фактически аргумент функции. На результат функции влияет не только порядок строк, но и значения этих выражений. В противоположность фразе \texttt{GROUP BY} в команде \texttt{SELECT} допускается только одно выражение, и ссылок на номера результирующих столбцов быть не должно.
+
+Еще один достойный упоминания аспект агрегатных функций -- фраза \texttt{FILTER}. Она по заданному условию отфильтровывает строки, передаваемые агрегатной функции. Например, путь требуется подсчитать количество автомобилей для каждой модели и каждого значения количества дверей
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT
+    car_model_id,
+    count(*) FILTER (WHERE number_of_doors = 2) doors2,
+    count(*) FILTER (WHERE number_of_doors = 3) doors3,
+    count(*) FILTER (WHERE number_of_doors = 4) doors4,
+    count(*) FILTER (WHERE number_of_doors = 5) doors5
+FROM car_portal_app.car
+GROUP BY car_model_id;
+\end{lstlisting}
+выведет
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
+car_model_id | doors2 | doors3 | doors4 | doors5
+-------------+--------+--------+--------+-------
+          43 |      0 |      0 |      0 |     2
+           8 |      0 |      0 |      1 |     0
+          11 |      0 |      2 |      1 |     0
+          80 |      0 |      1 |      0 |     0
+...
+\end{lstlisting}
+
+Того же результата можно достичь и таким образом
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+count(CASE WHEN number_of_doors = 2 THEN 1 END) doors2
+\end{lstlisting}
+но вариант с фразой \texttt{FILTER} короче и проще.
+
+Еще один пример на использование фразы \texttt{FILTER}
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT
+    sum(amount) FILTER (WHERE fare_conditions = 'Business') AS business,
+    sum(amount) FILTER (WHERE fare_conditions = 'Comfort') AS comfort,
+    sum(amount) FILTER (WHERE fare_conditions = 'Economy') AS economy,
+FROM ticket_flights;
+\end{lstlisting}
 
 
 \section{Копирование данных между файлом и таблицей}
@@ -1194,6 +1356,8 @@ SELECT substring('xy1234z', 'y*?(\d{1,3})');  -- вернет '1'
 \remark{
 Удобно представлять, что \emph{нежадные квантификаторы} типа \texttt{*?} представляют собой пружинки сжатия, которые тянут влево и в самом простом случае довольствуются пустой последовательностью, а \emph{жадные квантификаторы} (\texttt{*}) можно представлять как пружинки растяжения, которые стремятся занять всю последовательность и с неохотой уступают элементы
 }
+
+\section{Программирование на PL/pgSQL}
 
 
 \section{Приемы работы в \texttt{pgAdmin 4}}

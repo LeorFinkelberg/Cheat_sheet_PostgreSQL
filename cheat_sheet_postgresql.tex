@@ -149,6 +149,62 @@ CREATE TABLE aircrafts(
 );
 \end{lstlisting}
 
+Создать таблицу с \emph{автоматическим} вычислением идентификационного номера строки
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+CREATE TABLE test(
+    id SERIAL PRIMARY KEY,
+    name TEXT
+);
+\end{lstlisting}
+
+Теперь при вставке строки без явного указания идентификационного номера последний будет вычисляться автоматически\footnote{Если при вставке строки имена некоторых атрибутов не явно не указываются, то считается, что значения этих атрибутов вычисляются автоматически, в противном случае они имет значение \texttt{<NULL>}}
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+INSERT INTO test(name) VALUES ('Ansys') RETURNING id;
+\end{lstlisting}
+выведет
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
++----+
+| id |
++----+
+|  1 |
++----+
+\end{lstlisting}
+
+Еще возвращенное значение можно было бы прочитать с помощью \emph{анонимной функции}
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+DO $$ -- анонимная функция
+    DECLARE -- объявление переменной
+        auto_generated_id INT;
+    BEGIN
+        -- значение атрибута id, которое возвращает RETURNING
+        -- можно связать с переменной auto_generated_id с помощью ключевого слова INTO
+        INSERT INTO test(name) VALUES ('Nastran') RETURNING id INTO auto_generated_id;
+        RAISE NOTICE 'The primary key is: %', auto_generated_id;
+    END
+$$;
+\end{lstlisting}
+выведет
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
+NOTICE: The primary key is: 2
+\end{lstlisting}
+
+
+
 \subsection{Создать таблицу по образу другой таблицы}
 
 Создать таблицу со структурой данных, аналогичной другой таблице (но \emph{без} ограничений базовой таблицы) можно так
@@ -1358,6 +1414,87 @@ SELECT substring('xy1234z', 'y*?(\d{1,3})');  -- вернет '1'
 }
 
 \section{Программирование на PL/pgSQL}
+
+\subsection{Примеры работы с функциями}
+
+Требуется построить текстовое представление ранга объявления
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+CREATE OR REPLACE FUNCTION cast_rank_to_text (rank INT) RETURNS TEXT AS
+$$
+DECLARE -- объявление функции
+    rank_result TEXT;
+BEGIN -- область видимости
+    IF rank = 5 THEN rank_result = 'Excellent';
+    ELSIF rank = 4 THEN rank_result = 'Very Good';
+    ELSIF rank = 3 THEN rank_result = 'Fair';
+    ELSIF rank = 2 THEN rank_result = 'Poor';
+    ELSE rank_result = 'No such rank';
+    END IF;
+    RETURN rank_result;
+END;
+$$ LANGUAGE plpgsql;
+
+SELECT n, cast_rank_to_text(n) FROM generate_series(1,6) AS t(n);
+\end{lstlisting}
+
+К слову, если бы этот код находился в отдельном файле, например, \texttt{sql\_quary.sql}, то его можно было запустить и посмотреть результат в терминале так
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+psql -U postgres -d postgres -c '\! chcp 1251' -f sql_query.sql
+\end{lstlisting}
+выведет
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
++---+-------------------+
+| n | cast_rank_to_text |
++---+-------------------+
+| 1 | No such rank      |
+| 2 | Poor              |
+| 3 | Fair              |
+| 4 | Very Good         |
+| 5 | Excellent         |
+| 6 | No such rank      |
++---+-------------------+
+\end{lstlisting}
+
+Рассмотренную выше задачу можно решить и с помощью конструкции \texttt{CASE}
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+CREATE OR REPLACE FUNCTION cast_rank_to_text (rank INT) RETURNS TEXT AS
+$$
+DECLARE
+    rank_result TEXT;
+BEGIN
+    CASE rank
+        WHEN 5 THEN rank_result = 'Excellent';
+        WHEN 4 THEN rank_result = 'Very Good';
+        WHEN 3 THEN rank_result = 'Good';
+        WHEN 2 THEN rank_result = 'Fair';
+        WHEN 1 THEN rank_result = 'Poor';
+        ELSE rank_result = 'No such rank';
+    END CASE;
+    RETURN rank_result;
+END; $$ LANGUAGE plpgsql;
+\end{lstlisting}
+
+Важно отметить, что в этой форме \texttt{CASE} запрещено сопоставление со значением \texttt{NULL}, потому что результатом сравнения с \texttt{NULL} является \texttt{NULL}. Чтобы обойти это ограничение, можно воспользоваться второй формой и задать условие сопоставления явно
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+...
+WHEN rank IS NULL THEN RAISE EXCEPTION 'Rank should be not NULL';
+...
+\end{lstlisting}
 
 
 \section{Приемы работы в \texttt{pgAdmin 4}}

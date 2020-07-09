@@ -54,6 +54,59 @@ host    appdb           app             all                     trust
 
 \end{lstlisting}
 
+\section{Создание резервной копии базы данных}
+
+Задачу резервного копирования можно запускать с выделенного backup-сервера или с сервера базы данных. В комплекте PostgreSQL есть 2 утилиты, которые позволяют делать резервные копии: \texttt{pg\_dump}, \texttt{pg\_dumpall} (сохраняют резервную копию базы данных в текстовом файле или другом виде) и \texttt{pg\_basebackup} (делает базовую резервную копию \emph{работающего} сервера PostgreSQL). Кроме того есть возможность использовать утилиты файлового копирования, такие \texttt{rsync}, \texttt{tar}, \texttt{cp} и т.п.
+
+Утилита \texttt{pg\_dump} подходит для случаев, когда нужно сделать резервную копию таблицы, базы или схемы, а \texttt{pg\_basebackup} -- подходит для случаев, когда нужно сделать резервную копию целиком всего кластера базы данных или настроить реплику. Утилиты \texttt{rsync}, \texttt{tar}, \texttt{cp} также используются для случаев копирования всего кластера.
+
+Примеры создания резервной копии базы данных
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
+pg_dump -U postgres -d demo --format=tar -v -f $(date +%Y-%m-%d).demo.tar
+pg_dump -U postgres -d demo -f $(date +%Y-%m-%d).demo.sql
+\end{lstlisting}
+
+Создать резервную копию с backup-сервера в каталог \directory{/backup} (каталог должен существовать)
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
+pg_basebackup -x -h db01.example.com -U backup -D /backup
+
+\end{lstlisting}
+
+Копирование со сжатием в bzip2, для случаев, когда нужно использовать нестандартный алгоритм сжатия
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
+pg_basebackup -x --format=tar -h db01.example.com -U backup -D - | bzip2 -9 > /backup/db01/backup-$(date +%Y-%m-%d).tar.bz2
+\end{lstlisting}
+
+Копирование со сжатием в несколько потоков (задействуем 8 ядер)
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
+pg_basebackup -x --format=tar -h db01.example.com -U backup -D - | lbzip2 -n 8 -9 > /backup/db01/backup-$(date +%Y-%m-%d).tar.bz2
+\end{lstlisting}
+
+Копирование запускается на сервере базы данных. Формируемая резервная копия отправляется на удаленный сервер по ssh
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
+pg_basebackup -x --format=tar -h 127.0.0.1 -U backup -D - | \
+    ssh backup@backup.example.com "tar -xf - -C /backup/"
+\end{lstlisting}
+
+Восстановить данные из созданных backup-файлов можно с помощью утилиты \texttt{pg\_restore}.
+
+
+
 
 \section{Логический порядок обработки инструкции \texttt{SELECT}}
 

@@ -160,7 +160,7 @@ CREATE TABLE test(
 );
 \end{lstlisting}
 
-Теперь при вставке строки без явного указания идентификационного номера последний будет вычисляться автоматически\footnote{Если при вставке строки имена некоторых атрибутов не явно не указываются, то считается, что значения этих атрибутов вычисляются автоматически, в противном случае они имет значение \texttt{<NULL>}}
+Теперь при вставке строки без явного указания идентификационного номера последний будет вычисляться автоматически\footnote{Если при вставке строки имена некоторых атрибутов явно не указываются, то считается, что значения этих атрибутов вычисляются автоматически, в противном случае они имет значение \texttt{<NULL>}}
 \begin{lstlisting}[
 style = sql,
 numbers = none
@@ -1424,7 +1424,7 @@ numbers = none
 ]
 CREATE OR REPLACE FUNCTION cast_rank_to_text (rank INT) RETURNS TEXT AS
 $$
-DECLARE -- объявление функции
+DECLARE -- объявление переменных
     rank_result TEXT;
 BEGIN -- область видимости
     IF rank = 5 THEN rank_result = 'Excellent';
@@ -1494,6 +1494,400 @@ numbers = none
 ...
 WHEN rank IS NULL THEN RAISE EXCEPTION 'Rank should be not NULL';
 ...
+\end{lstlisting}
+
+\subsection{Итерирование}
+
+Итерирование позволяет повторять блок команд. При этом часто требуется определить начальную точку и условие окончания. В PostgreSQL есть несколько команд для обхода результатов запроса и организации циклов: \texttt{LOOP}, \texttt{CONTINUE}, \texttt{EXIT}, \texttt{FOR}, \texttt{WHILE} и \texttt{FOR EACH}.
+
+Самая простая команда выглядит так
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
+[ <<label>> ]
+LOOP
+    statements
+END LOOP [ label ];
+\end{lstlisting}
+
+Для демонстрации перепишем функцию \texttt{factorial\_psql}
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+DROP FUNCTION IF EXISTS factorial_psql (fact INT); 
+CREATE OR REPLACE FUNCTION factorial_psql (fact INT) RETURNS BIGINT AS
+$$
+DECLARE -- область объявления переменных
+    result BIGINT = 1;
+BEGIN -- область видимости функции
+    IF fact = 1 THEN RETURN 1;
+    ELSIF fact IS NULL OR fact < 1 THEN RAISE EXCEPTION 'Provide a positive integer';
+    ELSE
+        LOOP
+            result = result*fact;
+            fact = fact - 1;
+            EXIT WHEN fact = 1;
+        END LOOP;
+    END if;
+    RETURN result;
+END; $$ LANGUAGE plpgsql;
+
+SELECT n, 'fact('||n||')'||' -> '||factorial_psql(n) AS result
+FROM (VALUES (3),(5),(8)) AS t(n); -- источником данных выступает виртуальная таблица
+\end{lstlisting}
+выведет
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
++---+------------------+
+| n |      result      |
++---+------------------+
+| 3 | fact(3) -> 6     |
+| 5 | fact(5) -> 120   |
+| 8 | fact(8) -> 40320 |
++---+------------------+
+\end{lstlisting}
+
+Здесь условная команда \texttt{EXIT} предотвращает зацикливание. После выполнения \texttt{EXIT} управление передается команде, следующей за \texttt{LOOP}. Для управления выполнением команд внутри цикла \texttt{LOOP} PL/pgSQL предоставляет также команду \texttt{CONTINUE}, которая похожа на \texttt{EXIT}, только вместо выхода из цикла передает управление на его начало, пропуская код, оставшийся до конца цикла.
+
+\remark{%
+Рекомендуется избегать команд \texttt{CONTINUE} и \texttt{EXIT}, особенно в середине блока, потому что они нарушают порядок выполнения, что затрудняет чтение кода
+}
+
+Команда \texttt{WHILE} продолжает выполнять блок команд, пока истинно заданное условие. Вот ее синтаксис
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
+[ <<label>> ]
+WHILE boolean-expression LOOP
+    statements
+END LOOP [ label ];
+\end{lstlisting}
+
+Ниже мы печатаем дни текущего месяца в цикле \texttt{WHILE}
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+DO $$
+DECLARE -- область объявления переменных
+    first_day_in_month date	:= date_trunc('month', current_date)::date;
+    last_day_in_month date := (
+        date_trunc('month', current_date) + '1 month - 1 day'::interval
+    )::date;
+    counter date := first_day_in_month;
+BEGIN -- область видимости
+    WHILE (counter <= last_day_in_month) LOOP
+        RAISE NOTICE '%', counter;
+        counter := counter + '1 day'::interval;
+    END LOOP;
+END; $$ LANGUAGE plpgsql;
+\end{lstlisting}
+
+В PL/pgSQL есть две формы команды \texttt{FOR}, предназначенные для:
+\begin{itemize}
+	\item обход строк, возвращенных SQL-запросом;
+	
+	\item обхода диапазона целых чисел.
+\end{itemize}
+
+Синтаксис команды \texttt{FOR} представлен ниже:
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
+[ <<label>> ]
+FOR name IN [ REVERSE ] expression1 .. expression2 [ BY expression ] LOOP
+    statements
+END LOOP [ label ];
+\end{lstlisting}
+
+Здесь \texttt{name} -- имя локальной переменной типа \texttt{integer}. \emph{Областью видимости} этой переменной является \emph{цикл} \texttt{FOR}. Команды внутри цикла могут ее \emph{читать}, но не могут изменять. Но это поведение можно изменить, определив переменную в секции объявлений объемлющего блока. Выражения \texttt{expression1} и \texttt{expression2} должны иметь целые значения. Если \texttt{expression1} равно \texttt{expression2}, то цикл \texttt{FOR} выполняется только один раз.
+
+Ключевое слово \texttt{REVERSE} необязательно; оно определяет порядок, в котором генерируется диапазон (возрастающий или убывающий). Если слово \texttt{REVERSE} опущено, то \texttt{expression1} должно быть меньше \texttt{expression2}, иначе цикл не выполнится ни разу. Наконец, ключевое слово \texttt{BY} задает шаг между двумя последовательными числами; следующее за ним выражение \texttt{expression} должно быть положительным целым числом. В показанном ниже цикле \texttt{FOR} производится обход диапазона отрицательных чисел в обратном порядке и печатаются значения -1, -3, ..., -9
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+DO $$ -- анонимная функция
+BEGIN
+    FOR j REVERSE -1 .. -10 BY 2 LOOP
+        RAISE NOTICE '%', j;
+    END LOOP;
+END; $$ LANGUAGE plpgsql;
+\end{lstlisting}
+
+Синтаксис цикла для обхода результатов запроса несколько иной
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+[ <<label>> ]
+FOR target IN query LOOP
+    statements
+END LOOP [ label ];
+\end{lstlisting}
+
+Локальная переменная \texttt{target} объявлена в объемлющем блоке. Она необязательно должна быть примитивного типа, скажем, \texttt{INTEGER} или \texttt{TEXT}, допускается также составной тип и тип \texttt{RECORD}. В PL/pgSQL обходить можно результат выполнения курсора или команды \texttt{SELECT}. Курсор -- это специальный объект, инкапсулирующий запрос \texttt{SELECT} и позволяющий читать результаты по нескольку строк за раз. В следующем примере печатаются имена всех баз данных
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+DO $$
+DECLARE
+  database RECORD;
+BEGIN
+  FOR database IN SELECT * FROM pg_database LOOP
+    RAISE NOTICE '%', database.datname;
+  END LOOP;
+END; $$ LANGUAGE plpgsql;
+\end{lstlisting}
+
+Здесь конструкция \texttt{SELECT * FROM pg\_database} возвращает набор строк, содержащих информацию о базах данных PostgreSQL. Каждая строка, возвращенная запросом, связывается с переменной цикла \texttt{database}, а затем выбирается значение атрибута \texttt{datname}.
+
+\subsection{Возврат из функции}
+
+Команда возврата завершает функцию и передает управление вызывающей стороне. Существует несколько разновидностей команды возврата: \texttt{RETURN}, \texttt{RETURN NEXT}, \texttt{RETURN QUERY}, \texttt{RETURN QUERY EXECUTE} и т.д. Команда \texttt{RETURN} может возвращать \emph{одно значение} или \emph{множество}.
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+DO $$
+BEGIN
+  RETURN; -- по достижении этого места функция завершает работу
+  RAISE NOTICE 'This statement will not be executed';
+END; $$ LANGUAGE plpgsql;
+\end{lstlisting}
+
+Тип \texttt{VOID} используется, когда смысл функции заключается в побочных эффектах, например записи в журнал. Встроенная функция \texttt{pg\_sleep} задерживает выполнение серверного процесса на заданное число секунд.
+
+Тип возвращаемого значения может быть базовым, составным, доменным или псевдотипом. Показанная ниже функция возвращает представление учетной записи в формате JSON
+\begin{lstlisting}[
+style = sql,
+numbers = none
+] 
+-- sql
+CREATE OR REPLACE FUNCTION car_portal_app.get_account_in_json (account_id INT)
+RETURNS JSON AS $$
+  SELECT row_to_json(account)
+  FROM car_portal_app.account
+  WHERE account_id = $1;
+$$ LANGUAGE sql;
+
+-- plpgsql
+CREATE OR REPLACE FUNCTION car_portal_app.get_account_in_json (acc_id INT)
+RETURNS JSON AS 
+$$
+BEGIN
+  -- если возвращается одна строка, то просто RETURN!!!
+  RETURN (SELECT row_to_json(account)
+          FROM car_portal_app.account
+          WHERE account_id = acc_id);
+END; $$ LANGUAGE plpgsql;
+\end{lstlisting}
+
+Для возврата нескольких строк используются функции, возвращающие множества. Строка может иметь базовый тип (например, \texttt{integer}), составной, табличный, доменный или псевдотип. Функция, \emph{возвращающая множество}, помечается ключевым словом \texttt{SETOF}
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+-- sql
+CREATE OR REPLACE FUNCTION car_portal_app.car_model(model_name TEXT)
+RETURNS SETOF car_portal_app.car_model AS
+$$
+SELECT car_model_id, make, model
+FROM car_portal_app.car_model
+WHERE model = model_name;
+$$ LANGUAGE sql;
+
+-- plpgsql
+CREATE OR REPLACE FUNCTION car_portal_app.car_model(model_name TEXT)
+RETURNS SETOF car_portal_app.car_model AS $$
+BEGIN
+  RETURN QUERY SELECT car_model_id, make, model FROM car_portal_app.car_model
+  WHERE model = model_name;
+END; $$ LANGUAGE plpgsql;
+\end{lstlisting}
+
+Если для возвращаемого значения еще нет типа, то можно \cite[\strbook{214}]{juba:2019}:
+\begin{itemize}
+	\item определить и использовать новый тип данных,
+	
+	\item использовать тип \texttt{TABLE},
+	
+	\item использовать выходные параметры и тип данных \texttt{RECORD}.
+\end{itemize}
+
+Пусть требуется вернуть только поля \texttt{car\_model\_id} и \texttt{make}, и соответствующий тип данных не определен. Тогда предыдущую функцию можно переписать в виде
+\begin{lstlisting}[
+style = sql,
+numbers = none
+] 
+CREATE OR REPLACE car_portal_app.car_model(model_name TEXT)
+RETURNS TABLE (car_model_id INT, make TEXT) AS $$
+BEGIN
+  -- если возвращается множество строк, то RETURN QUERY!!!
+  RETURN QUERY SELECT car_model_id, make FROM car_portal_app.car_model
+  WHERE model = model_name;
+END; $$ LANGUAGE plpgsql;
+\end{lstlisting}
+
+\subsection{Обработка исключений}
+
+Для перехвата и возбуждения исключений в PostgreSQL предназначены команды \texttt{EXCEPTION} и \texttt{RAISE}. Ошибки возникают при нарушении ограничений целостности данных или при выполнении недопустимых операций, например: присваивание текста целому числу, деление на нуль, присваивание переменной значения вне допустимого диапазона и т.д. По умолчанию любая ошибка в PL/pgSQL-функции приводит к прерыванию выполнения и откату изменений. Чтобы восстановиться, можно перехватить ошибку с помощью фразы \texttt{EXCEPTION}, синтаксически очень похожей на блоки в PL/pgSQL. Кроме того, ошибки можно возбуждать в команде \texttt{RAISE}.
+Пример
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+CREATE OR REPLACE FUNCTION check_not_null (value anyelement) RETURNS VOID AS 
+$$
+BEGIN
+  IF (value IS NULL) THEN
+    RAISE EXCEPTION USING ERRCODE = 'check_violation';
+  END IF;
+END; $$ LANGUAGE plpgsql;
+\end{lstlisting}
+
+Полиморфная функция \texttt{check\_not\_null} просто возбуждает ошибку, в которой состояние \texttt{SQLSTATE} содержит строку \texttt{check\_violation}. Если вызвать эту функцию, передав ей \texttt{NULL} в качестве аргумента, то возникнет ошибка.
+
+Чтобы можно было точно узнать, когда и почему возникло исключение, в PostgreSQL определено несколько категорий кодов ошибок. Например, если пользователь возбудил исключение, не указав \texttt{ERRCODE}, то \texttt{SQLSTATE} будет содержать строку \texttt{P001}, а если нарушено ограничение уникальности, то строку 23505.
+
+Для определения причины ошибки в команде \texttt{EXCEPTION} можно сравнивать \texttt{SQLSTATE} или название условия
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+WHEN unique_violation THEN ...
+WHEN SQLSTATE '23505' THEN ...
+\end{lstlisting}
+
+Наконец, при возбуждении ошибки можно задать сообщение об ошибке и \texttt{SQLSTATE}, памятуя о том, что код ошибки \texttt{ERRCODE} должен содержать 5 цифр и / или букв в кодировке ASCII, но не должен быть равен 00000, например
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+DO $$
+BEGIN
+  RAISE EXCEPTION USING ERRCODE = '1234X', MESSAGE = 'test customized SQLSTATE:';
+  EXCEPTION WHEN SQLSTATE '1234X' THEN RAISE NOTICE '% %', SQLERRM, SQLSTATE;
+END; $$ LANGUAGE plpgsql;
+\end{lstlisting}
+
+Для демонстрации перехвата исключений перепишем функцию \texttt{factorial} так, чтобы она возвращала \texttt{NULL}, если передан аргумент \texttt{NULL}
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+DROP FUNCTION IF EXISTS factorial (INT);
+CREATE OR REPLACE FUNCTION factorial(fact INT) RETURNS BIGINT AS
+$$
+BEGIN
+  PERFORM check_not_null(fact);
+  IF fact > 1 THEN RETURN factorial(fact - 1)*fact;
+  ELSIF fact IN (0,1) THEN RETURN 1;
+  ELSE RETURN NULL;
+  END IF;
+  
+  EXCEPTION
+    WHEN check_violation THEN RETURN NULL;
+    WHEN OTHERS THEN RAISE NOTICE '% %', SQLERRM, SQLSTATE;
+END; LANGUAGE plpgsql;
+\end{lstlisting}
+
+Если теперь вызвать
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT * FROM factorial(NULL::INT); -- вернет NULL
+\end{lstlisting}
+
+Функция \texttt{factorial} не возбудила ошибку, поскольку она была перехвачена в команде \texttt{EXCEPTION} и вместо нее возвращено \texttt{NULL}. Обратите внимание, что сравнивается не \texttt{SQLSTATE}, а имя условия. Специальное имя условия \texttt{OTHERS} соотвествует любой ошибке, оно часто используется, чтобы перехватить неожиданные ошибки.
+
+\subsection{Динамический SQL}
+
+Динамический SQL служит для построения и выполнения запросов <<на лету>>. В отличие от статической команды SQL, полный текст динамической команды заранее неизвестен и может меняться от выполнения к выполнению. Допускаются команды подъязыков DDL, DCL и DML. Динамический SQL позволяет сократить объем однотипных задач.
+
+Еще одно очень важное применение динамического SQL -- устранение побочных эффектов кеширования в PL/pgSQL, поскольку запросы, выполняемые с помощью команды \texttt{EXECUTE}, \emph{не кешируются}.
+
+Для реализации динамического SQL предназначена команда \texttt{EXECUTE}. Она принимает и интерпретирует строку. Синтаксис этой команды показан ниже
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+EXECUTE command-string [ INTO [STRICT] target ] [ USING expression [, ...] ];
+\end{lstlisting}
+
+\paragraph{Динамическое выполнение команд DDL} Иногда бывает необходимо выполнить операции на уровне объектов базы данных: таблиц, индексов, столбцов, ролей и т.д. Например, после развертывания таблицы с целью обновления статистики часто производят ее очистку и анализ. Так для анализа таблиц из схемы \texttt{car\_portal\_app} можно было бы написать такой скрипт
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+DO $$ -- анонимная функция
+DECLARE -- область определения переменных
+  table_name text;
+  schema_name text := 'bookings';
+BEGIN -- область видимости
+  FOR table_name IN (SELECT tablename FROM pg_tables
+                     WHERE schemaname = schema_name) LOOP
+    RAISE NOTICE 'Analyzing %', table_name;
+    EXECUTE 'ANALYZE ' || schema_name || '.' || table_name;
+  END LOOP;
+END; $$ LANGUAGE plpgsql;
+\end{lstlisting}
+
+\paragraph{Динамическое выполнение команд DML} Некоторые приложения работают с данными интерактивно. Например, ежемесячно могут генерировать данные для выставления счетов. Бывает и так, что приложение фильтрует данные на основе критерия, заданного пользователем. Для таких задач очень удобен динамический SQL. Пример
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+CREATE OR REPLACE FUNCTION get_lines(predicate TEXT)
+  RETURNS TABLE(name VARCHAR, job VARCHAR) AS
+$$
+DECLARE
+  table_name TEXT:= 'employees';
+BEGIN
+  RETURN QUERY EXECUTE 'SELECT name, job FROM table_name WHERE ' || predicate;
+END; $$ LANGUAGE plpgsql;
+\end{lstlisting}
+
+Протестируем
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT * FROM get_lines('id IN (1, 10, 15)');
+\end{lstlisting}
+
+\paragraph{Динамический SQL и кеширование}
+
+Как уже было сказано, PL/pgSQL \emph{кеширует планы выполнения}. Это хорошо, если сгенерированный план статический. Например, для следующей команды ожидается, что всегда будет использоваться просмотр индекса благодаря его избирательности. В таком случае кеширование плана экономит время и повышает производительность.
+
+Но бывает и подругому. Предположим, что построен индекс по столбцу \texttt{advertisement\_date}, и мы хотим получить количество объявлений, начиная с некоторой даты. Для чтения записей из таблицы \texttt{advertisement\_date} можно применить как просмотр индекса, так и последовательный просмотр. Все зависит от избирательности индекса. Кеширование плана выполнения такого запроса может создать серьезные проблемы.
+
+Для решения проблемы можно переписать функцию, указав в качестве языка SQL, или оставить PL/pgSQL, но воспользоваться командой \texttt{EXECUTE} (тогда план выполнения запроса не будет кешироваться)
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+CREATE OR REPLACE FUNCTION car_portal_app.get_advertisement_count(some_date timestamptz)
+RETURNS BIGINT AS
+$$
+DECLARE
+  count BIGINT;
+BEGIN
+  -- запросы EXECUTE не кешируется!!!
+  EXECUTE 'SELECT count(*) FROM car_portal_app.advertisement
+           WHERE advertisement_date >= $1'
+  USING some_date -- символ $1 ссылается на значения в предложении USING
+  INTO count; -- число строк, возвращенное запросом, связывается с переменной count
+  RETURN count;
+END; $$ LANGUAGE plpgsql;
 \end{lstlisting}
 
 
@@ -1575,6 +1969,42 @@ numbers = none
 ]
 $ psql -U postgtes -d demo -c '\x' -c 'TABLE aircrafts LIMIT 5;'
 \end{lstlisting}
+
+Выполнить вычисления факториала для чисел 5, 8 и 12, результат представить в виде таблицы из пар <<\emph{число} - \emph{факториал\_от\_числа}>>, а затем результат выполнения запроса записать в csv-файл
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+psql -U postgres -d postgres
+    -c '\! chcp 1251'\ -- настройка кодовой страницы
+    -c 'DROP TABLE IF EXISTS fact_t;'\
+    -c 'CREATE TABLE fact_t AS
+        SELECT n, factorial(n) AS fact
+        FROM (VALUES (5),(8),(12)) AS t(n);'\
+    -c "COPY fact_t TO 'E:/[WorkDirectory]/GARBAGE/fact_out.csv' WITH (FORMAT csv);"
+\end{lstlisting}
+
+Загрузить файл \texttt{gemini\_ethusd\_d.csv} в подготовленную таблицу \texttt{gemini}
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+psql -U postgres -d postgres
+    -- создать таблицу в текущей БД
+    -c 'CREATE TABLE gemini ( 
+            date timestamp,
+            symbol text not null,
+            open real not null,
+            high real not null,
+            low real not null,
+            close real not null,
+            volume_eth real not null,
+            volume_usd real not null
+        PRIMARY KEY (date));'
+    -- записать в подготовленную таблицу csv-файл
+    -c "COPY gemini FROM 'E:/.../gemini_ethusd_d.csv' WITH (HEADER true, FORMAT csv);"
+\end{lstlisting}
+
 
 \remark{%
 Лучше для нескольких команд использовать несколько ключей \texttt{-c}
@@ -1924,6 +2354,74 @@ numbers = none
 ]
 SELECT date_trunc('year', '2001-02-16 20:38:40'::timestamp); -- 2001-01-01 00:00:00
 \end{lstlisting}
+
+\subsection{Выполнение динамически формируемых команд}
+
+Часто требуется динамически формировать команды внутри функции на PL/pgSQL, то есть такие команды, в которых при каждом выполнении могут использоваться разные таблицы или типы данных. Обычно PL/pgSQL кеширует планы выполнения, но в случае с динамическими командами это не будет работать.
+
+Для исполнения динамических команд предусмотрен оператор \texttt{EXECUTE}
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+EXECUTE command-string [ INTO [STRICT] target ] [ USING expression [, ...] ];
+\end{lstlisting}
+где \texttt{command-string} -- это выражение, формирующее строку (типа \texttt{text}) с текстом команды, которую нужно выполнить. Необязательная цель -- это переменная-запись, переменная-кортеж или разделенный запятыми список простых переменных и полей записи/кортежа, куда будут помещены результаты команды. Необязательные выражения в \texttt{USING} формируют значения, которые будут вставлены в команду.
+
+В сформированном тексте команды замена имен переменных PL/pgSQL на их значения проводиться не будет. Все необходимые значения переменных должны быть вставлены в командную сроку при ее построении, либо нужно использовать параметры, как описано ниже.
+
+Также, \emph{нет никакого плана кеширования} для команд, выполняемых с помощью \texttt{EXECUTE}. Вместо этого план создается каждый раз при выполнении. Таким образом, строка команды может динамически создаваться внутри функции для выполнения действий с различными таблицами и столбцами.
+
+Предложение \texttt{INTO} указывает, куда должны быть помещены результаты SQL-команды, возвращающей строки. Если используется переменная строкового типа или список переменных, то они должны в точности соответствовать структуре результата запроса (когда используется переменная типа \texttt{record}, она автоматически приводится к строковому типу результата запроса). Если возвращается несколько строк, то только первая будет присвоена переменной(ым) в \texttt{INTO}. Если не возвращается ни одной строки, то присваивается NULL. Без предложения \texttt{INTO} результаты запроса отбрасываются.
+
+С указанием \texttt{STRICT} запрос должен вернуть ровно одну строку, иначе выдается сообщение об ошибке.
+
+В тексте команды можно использовать значения параметров. Ссылки на эти параметры обозначаются как \texttt{\$1}, \texttt{\$2} и т.д. Эти символы указывают на значения, находящиеся в предложении \texttt{USING}. Такой метод зачастую предпочтительнее, чем вставка значений в команду в виде текста: он позволяет исключить во время исполнения дополнительные расходы на преобразования значений в тексте и обратно, и не открывает возможности для SQL-инъекций, не требуя применять экранирование или кавычки для спецсимволов.
+
+Пример
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+...
+EXECUTE 'SELECT count(*) FROM mytable WHERE inserted_by = $1 AND inserted <= $2'
+  INTO c -- число строк связывается с переменной `c`
+  USING checked_user, checked_date;
+...
+\end{lstlisting}
+
+Обратите внимание, что символы параметров можно использовать только вместо значений данных. Если же требуется динамически формировать имена таблиц или столбцов, их необходимо вставлять в виде текста. Например, если в предыдущем запросе необходимо динамически задавать имя таблицы, можно сделать следующее
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+...
+EXECUTE 'SELECT count(*) FROM '
+  || quote_ident(tabname)
+  || ' WHERE inserted_by = $1 AND inserted <= $2'
+  INTO c
+  USING checked_user, checked_date;
+...
+\end{lstlisting}
+
+В качестве более аккуратного решения, вместо имени таблиц или столбцов можно использовать указание формата \verb|%I| с функцией \texttt{format()} (текст, разделенный символами новой строки, соединяется вместе)
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+...
+-- самый аккуратный вариант
+-- символы $1 и $2 указывают на значения в предложении USING
+EXECUTE format('SELECT count(*) FROM %I '
+  'WHERE inserted_by = $1 AND inserted <= $2', tabname)
+  INTO c
+  USING checked_user, checked_date;
+...
+\end{lstlisting}
+
+Команда \texttt{EXECUTE} с неизменяемым текстом и параметрами \texttt{USING}, функционально эквивалентна команде, записанной напрямую в PL/pgSQL, в которой переменные PL/pgSQL автоматически заменяются значениями. Важное отличие в том, что \texttt{EXECUTE} при каждом исполнении \emph{заново} строит план команды с учетом текущих значений параметров, тогда как PL/pgSQL строит \emph{общий план} выполнения и \emph{кеширует} его при повторном использовании. В тех случаях, когда наилучший план выполнения сильно зависит от значений параметров, может быть полезно использовать \texttt{EXECUTE} для \emph{гарантии} того, что не будет выбран общий план.
+
+Указание \verb|%I| равнозначно вызову \texttt{quote\_ident}, а \verb|%L| -- вызову \texttt{quote\_nullable}. 
 
 
 

@@ -49,6 +49,19 @@
 	\item Быстро отвечать на запросы пользователей позволяет Redis -- нереляционная высокопроизводительная СУБД, она хранит данные в оперативной памяти.
 \end{itemize}
 
+\section{Ответвления от PostgreSQL}
+
+От PostgreSQL существует более 20 ответвлений. На протяжении многих лет различные группы создавали ответвления и затем включали результаты своей работы в PostgreSQL:
+\begin{itemize}
+	\item HadoopDB -- гибрид PostgreSQL с технологиями MapReduce, ориентированный на аналитику,
+	
+	\item Greenplum -- представляет собой кластер над экземплярами PostgreSQL без разделения ресурсов с массово параллельной обработкой (MPP). Применяется для создания хранилищ данных и аналитики,
+	
+	\item Vertica -- столбцовая СУБД ориентированная на аналитику данных. Терминальный клиент для Python можно изучить на странице проекта \url{https://github.com/vertica/vertica-python},
+	
+	\item Amazon Redshift -- популярное хранилище данных на базе PostgreSQL 8.0.2. Предназначено в основном для OLAP-приложений.
+\end{itemize}
+
 
 
 \section{Сброс пароля для \texttt{psql} и \texttt{pgAdmin4}}
@@ -1970,6 +1983,122 @@ BEGIN
   INTO count; -- число строк, возвращенное запросом, связывается с переменной count
   RETURN count;
 END; $$ LANGUAGE plpgsql;
+\end{lstlisting}
+
+\section{PostgreSQL и Python}
+
+\subsection{Простой пример работы с PostgreSQL через библиотеки SQLAlchemy и psycopg2}
+
+Пример работы с базой данных при помощи библиотеки \texttt{psycopg2}
+\begin{lstlisting}[
+style = ironpython,
+numbers = none
+]
+import psycopg2
+
+conn_info = {
+    'user' : 'postgres',
+    'dbname' : 'demo',
+    'port' : 5432
+}
+
+# создаем соединение с базой данных
+conn = psycopg2.connect(**conn_info)
+
+# создаем объект-курсор
+cur = conn.cursor()
+
+# выполняем запрос
+cur.execute('''
+    SELECT count(*), count(DISTINCT fare_conditions)
+    FROM ticket_flights
+''')
+
+# выводим результат работы SQL-запроса
+cur.fetchall()  # [(1045726, 3)]
+
+# если сейчас попытаться извлечь лишь первую строку результата, то вывод будет пустым
+cur.fetchone()
+
+# чтобы все-таки вывести первую строку, требуется повторить выборку
+cur.execute('SELECT count(*), count(DISTINCT fare_conditions) FROM ticket_flights')
+cur.fetchone()  # (1045726, 3)
+\end{lstlisting}
+
+Пример работы с базой данных при помощи библиотеки \texttt{sqlalchemy}
+\begin{lstlisting}[
+style = ironpython,
+numbers = none
+]
+import sqlalchemy
+import pandas as pd
+
+engine = sqlalchemy.create_engine('postgresql://postgres@localhost:5432/demo')
+
+# создаем соединение
+conn = engine.connect(); conn # <sqlalchemy.engine.base.Connection at 0xd732088>
+
+# выполняем запрос
+conn.execute('''
+    SELECT count(*), count(DISTINCT fare_conditions)
+    FROM ticket_flights
+''').fetchall()  # [(1045726, 3)]
+
+# и тут же, без повторного выполнения запроса можно извлечь только первую строку результата
+conn.execute('''
+    SELECT count(*), count(DISTINCT fare_conditions)
+    FROM ticket_flights
+''').fetchone()  # (1045726, 3)
+
+conn.execute('''
+    SELECT fare_conditions, max(amount)
+    FROM ticket_flights
+    GROUP BY 1
+''').fetchall()
+# [('Business', Decimal('203300.00')),
+#  ('Comfort', Decimal('47600.00')),
+#  ('Economy', Decimal('74500.00'))]
+
+conn.execute('''
+    SELECT fare_conditions, max(amount)
+    FROM ticket_flights
+    GROUP BY 1
+''').fetchone()
+# ('Business', Decimal('203300.00'))
+
+pd.read_sql('''
+    select fare_conditions, max(amount)
+    from ticket_flights
+    group by 1;''',
+engine)  # обязательно нужно передать ранее созданный движок или соединение
+#   fare_conditions       max
+# 0        Business  203300.0
+# 1         Comfort   47600.0
+# 2         Economy   74500.0
+\end{lstlisting}
+
+К слову, еще с помощью библиотеки \texttt{sqlalchemy} можно работать, например, с \emph{распределенным аналитическим хранилищем больших данных} \href{http://kylin.apache.org/blog/2019/06/26/use-python-for-data-science-with-apache-kylin/}{\ttfamily Apache Kylin}
+\begin{lstlisting}[
+style = ironpython,
+numbers = none
+]
+import sqlalchemy
+import pandas as pd
+import matplotlib.pyplot as plt
+
+kylin_engine = sqlalchemy.create_engine('kylin://<username>:<password>@1<IP>:<PORT>/<project_name>', connect_args={'timeout' : 60})
+sql = '''
+    SELECT movieid, count(DISTINCT userid) AS COUNT_USERS
+    FROM userratings
+    GROUP BY movieid
+    ORDER BY count(DISTINCT userid) DESC
+    LIMIT 15
+'''
+
+moviecount = pd.read_sql(sql, kylin_engine)
+
+df = moviecount.sort_values(by='COUNT_USERS', ascending=False, na_position='first')
+...
 \end{lstlisting}
 
 

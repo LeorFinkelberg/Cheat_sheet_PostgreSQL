@@ -1957,6 +1957,7 @@ EXECUTE command-string [ INTO [STRICT] target ] [ USING expression [, ...] ];
 style = sql,
 numbers = none
 ]
+-- VACUUM не может использоваться в функциях
 DO $$ -- анонимная функция
 DECLARE -- область определения переменных
   table_name text;
@@ -1966,6 +1967,7 @@ BEGIN -- область видимости
                      WHERE schemaname = schema_name) LOOP
     RAISE NOTICE 'Analyzing %', table_name;
     EXECUTE 'ANALYZE ' || schema_name || '.' || table_name;
+    -- или так: EXECUTE format('ANALYZE %I.%I', schema_name, table_name);
   END LOOP;
 END; $$ LANGUAGE plpgsql;
 \end{lstlisting}
@@ -2004,6 +2006,8 @@ SELECT * FROM get_lines('id IN (1, 10, 15)');
 style = sql,
 numbers = none
 ]
+-- с помощью $1, $2 и пр. можно передвать ТОЛЬКО значения!!!
+-- для динамической подстановки имен таблиц, столбцов и пр. служит функция format()
 CREATE OR REPLACE FUNCTION car_portal_app.get_advertisement_count(some_date timestamptz)
 RETURNS BIGINT AS
 $$
@@ -2018,6 +2022,674 @@ BEGIN
   RETURN count;
 END; $$ LANGUAGE plpgsql;
 \end{lstlisting}
+
+\section{Массивы}
+
+Массив состоит из набора элементов (значений или переменных), порядок массива важен, каждый элемент идентифицируется своим индексом. Индексы элементов начинаются с 1. Все элементы массива должны иметь один и тот же тип, например \texttt{INT}, \texttt{TEXT} и т.п.
+
+Поддерживаются также многомерные массивы. В массивах PostgreSQL допускаются дубликаты и значения NULL.
+
+Инициализируем одномерный массив и получим первый элемент
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT ('{red,blue,green}'::text[])[1]; -- red
+\end{lstlisting}
+
+По умолчанию длина массива не задается, но ее можно указать, когда массивы используются для определения отношения. По умолчанию индексирование массива начинается с единицы, но и это поведение можно изменить, определив размерность на этапе инициализации
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT ('[0:2]={red,blue,green}'::text[])[1] AS color; -- blue
+\end{lstlisting}
+
+Пример
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+-- сначала создаем массив, а затем можно обращаться к его элементам
+WITH test AS ( -- общее табличное выражение
+  SELECT '[0:1]={10,20}'::int[] AS arr
+)
+SELECT arr, arr[0] FROM test;
+\end{lstlisting}
+выведет
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
++---------------+-----+
+|      arr      | arr |
++---------------+-----+
+| [0:1]={10,20} |  10 |
++---------------+-----+
+\end{lstlisting}
+
+Для инициализации массива используется конструкция \verb|{}|. Но есть и другой способ
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT array['red', 'green', 'blue'] AS primary_colors;
+\end{lstlisting}
+
+PostgreSQL предоставляет много функций для манипулирования массивами, например \texttt{array\_remove} для удаления элемента. Ниже продемонстрированы некоторые функции массивов:
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT
+  array_ndims(two_dim_array) AS "Number of dimensions",
+  array_dims(two_dim_array) AS "Dimensions index range",
+  array_length(two_dim_array, 1) AS "The array length of 1st dimension",
+  cardinality(two_dim_array) AS "Number of elements",
+  two_dim_array[1][1] AS "The first element"
+FROM
+  (VALUES ('{ {red,green,blue}, {red,green,blue} }'::text[][])) AS foo(two_dim_array);
+\end{lstlisting}
+выведет (предварительно нужно задать в \texttt{psql} \verb|\x|)
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
++-[ RECORD 1 ]----------------------+------------+
+| Number of dimensions              | 2          |
+| Dimensions index range            | [1:2][1:3] |
+| The array length of 1st dimension | 2          |
+| Number of elements                | 6          |
+| The first element                 | red        |
++-----------------------------------+------------+
+\end{lstlisting}
+
+Распространенное применение массивов -- моделирование многозначных атрибутов. Также они используются для моделирования хранилищ ключей и значений. Для этого заводят два массива: один содержит ключи, другой -- значения, а для связывания ключа со значением используется индекс массива.
+
+Так, в таблице \texttt{pg\_stats} этот подход применим для хранения информации о гистограмме типичных значений. В столбцах \texttt{most\_common\_vals} и \texttt{most\_common\_freqs} хранятся, соответственно, типичные значения в некотором столбце и частоты этих значений, как показано в примере ниже
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT tablename, attname, most_common_vals, most_common_freqs
+FROM pg_stats
+WHERE array_length(most_common_vals, 1) < 10 AND schemaname NOT IN
+                                ('pg_catalog', 'information_schema') LIMIT 1;
+\end{lstlisting}
+
+Для того чтобы передать функции произвольное число аргументов, следует использовать ключевое слово \texttt{VARIADIC}. Например
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+CREATE OR REPLACE null_count (VARIADIC arr int[]) RETURNS INT AS
+$$
+  SELECT count(CASE WHEN m IS NOT NULL THEN 1 ELSE NULL END)::int
+  FROM unnest($1) AS m(n)
+$$ LANGUAGE sql;
+\end{lstlisting}
+
+Пример использования
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT null_count(NULL, 5, NULL, 10); -- 2
+SELECT * FROM null_count(VARIADIC '{NULL,1}'::int[]); -- 1
+\end{lstlisting}
+
+Еще один пример работы с массивами
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT substring('python',1,i) FROM generate_series(1,length('python')) AS g(i);
+\end{lstlisting}
+выведет
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
++-----------+
+| substring |
++-----------+
+| p         |
+| py        |
+| pyt       |
+| pyth      |
+| pytho     |
+| python    |
++-----------+
+\end{lstlisting}
+
+Теперь можно обернуть этот вывод массивом
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT
+  array(SELECT substring('python',1,i)
+        FROM generate_series(1,length('python')) AS g(i)
+  )::text[];
+\end{lstlisting}
+выведет
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
++------------------------------+
+|            array             |
++------------------------------+
+| {p,py,pyt,pyth,pytho,python} |
++------------------------------+
+\end{lstlisting}
+
+\subsection{Функции и операторы массивов}
+
+Для массивов, как и для других типов данных, определены операторы. Например, оператор \texttt{=} сравнивает на равенство, а оператор \texttt{||} производит конкатенацию. Операторы \verb|@>| и \verb|<@| возвращают истину, если левый массив содержит в правом или содержится соотвественно
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT '{2,5,10}'::int[] @> '{2}'::int[]; --t
+SELECT '{42}'::int[] <@ '{2,42,100}'::int[]; --t
+\end{lstlisting}
+
+Элементы, попавшие в одну группу, можно представить в виде массива с помощью функции \texttt{array\_agg}.
+
+Функция \texttt{ANY} аналогична конструкции SQL \texttt{IN()} и служит для проверки принадлежности
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT 1 IN (1,2,3), 1 = ANY ('{1,2,3}'::int[]);
+\end{lstlisting}
+
+\subsection{Доступ к элементам массива и их модификация}
+
+К элементу массива обращаются по индексу; если элемент с указанным индексом не существует, то возвращается значение NULL:
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+CREATE TABLE colors(
+    color text[]
+);
+
+INSERT INTO colors(color) VALUES ('{red,green}'::text[]);
+INSERT INTO colors(color) VALUES ('{red}'::text[]);
+\end{lstlisting}
+
+Что теперь храниться в таблице?
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+-- в данном случае нумерация начинается с 1
+SELECT color[2] FROM colors;
+\end{lstlisting}
+выведет
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
++--------+
+| color  |
++--------+
+| green  |
+| <NULL> |
++--------+
+\end{lstlisting}
+
+Чтобы получить булеву маску для столбца \texttt{color} выполним такой запрос
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT
+  color[2] IS NOT DISTINCT FROM ('{green}'::text[])[1]
+  -- или просто
+  -- color[2] IS NOT DISTINCT FROM 'green'
+FROM colors;
+\end{lstlisting}
+вернет
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
++----------+
+| ?column? |
++----------+
+| t        |
+| f        |
++----------+
+\end{lstlisting}
+
+Можно получить срез массива, указав верхнюю и нижнюю границы
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+-- если индексов нет в массиве, то вернется пустой массив {}
+SELECT color[1:2] FROM colors;
+\end{lstlisting}
+
+Обновить можно массив целиком, срез массива или отдельный элемент. Можно также дописать элементы в конец массива, воспользовавшись оператором конкатенации \texttt{||}
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT array['red', 'green'] || '{blue}'::text[] AS append;
+\end{lstlisting}
+
+Для удаления всех элементов с указанным значением предназначена функция \texttt{array\_remove}
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT array_remove('{Ansys,Nastran,Abaqus}'::text[], 'Ansys');
+\end{lstlisting}
+выведет
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
++------------------+
+|   array_remove   |
++------------------+
+| {Nastran,Abaqus} |
++------------------+
+\end{lstlisting}
+
+Чтобы удалить элемент по индексу, можно воспользоваться фразой \texttt{WITH ORDINALITY}
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT array(
+   SELECT unnest
+   FROM unnest('{Ansys,Nastran,Abaqus}'::text[])
+   WITH ordinality
+   WHERE ordinality <> 1
+);
+\end{lstlisting}
+
+Здесь функция \texttt{unnest} преобразует массив в последовательность строк. Конструкция \texttt{WITH ORDINALITY} создает еще один столбец с именем \texttt{ordinality}, который по сути просто задает номера строк. В предложении \texttt{WHERE} выбираются те строки, у которых номера неравны 1. В список выборки включается только столбец \texttt{unnest}, который создается функцией \texttt{unnest}. 
+
+\subsection{Индексирование массивов}
+
+Для индексирования массивов используется GIN-индекс. В стандартном дистрибутиве PostgreSQL имеется класс операторов GIN для одномерных массивов. GIN-индекс поддерживают следующие операторы:
+\begin{itemize}
+	\item оператор содержит \verb|@>|,
+	
+	\item оператор содержится в \verb|<@|,
+	
+	\item пересекается \verb|&&|,
+	
+	\item оператор сравнения на равенство \verb|=|.
+\end{itemize}
+
+GIN-индекс по столбцу \texttt{color} создается следующим образом
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+CREATE INDEX ON colors USING GIN(color);
+\end{lstlisting}
+
+Чтобы заставить просматривать индекс, следует
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+postgres=> SET enable_seqscan TO off;
+postgres=> EXPLAIN SELECT * FROM colors WHERE '{red}'::text[] && color;
+\end{lstlisting}
+
+\section{Хранилище ключей и значений}
+
+Хранилище ключей и значений, или ассоциативный массив, -- очень популярная структура данных в современных языках программирования. Имеются также базы данных, специально заточенные под эту структуру данных, например Redis.
+
+PostgreSQL поддерживает хранилище ключей и значений -- \texttt{hstore}. Расширение \texttt{hstore} дает в руки разработчику лучшее из обоих миров, оно предлагает дополнительную гибкость, не жертвуя функциональностью PostgreSQL.
+
+Кроме того, \texttt{hstore} позволяет моделировать \emph{слабоструктурированные данные} и \emph{разреженные массивы}, оставаясь в рамках реляционной модели.
+
+Для создания расширения \texttt{hstore} нужно выполнить следующую команду от имени суперпользователя
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+CREATE EXTENSION hstore;
+\end{lstlisting}
+
+Текстовое представление \texttt{hstore} содержит нуль или более пар \texttt{key=>value}, разделенных запятой, например
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+postgres=# SELECT 'tires=>"winter tires", seat=>leather'::hstore;
+\end{lstlisting}
+выведет
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
++--------------------------------------------+
+|                   hstore                   |
++--------------------------------------------+
+| "seat"=>"leather", "tires"=>"winter tires" |
++--------------------------------------------+
+\end{lstlisting}
+
+Можно также сгенерировать одиночное значение в \texttt{hstore} с помощью функции \texttt{hstore(key, value)}
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT hstore('CAE-package', 'Ansys');
+\end{lstlisting}
+выведет
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
++------------------------+
+|         hstore         |
++------------------------+
+| "CAE-package"=>"Ansys" |
++------------------------+
+\end{lstlisting}
+
+Все ключи в хранилище \texttt{hstore} должны быть уникальны. Однако у \texttt{hstore} есть ограничение:
+\begin{itemize}
+	\item это не настоящее хранилище документов, поэтому представить в нем вложенные объекты трудно,
+	
+	\item управление множеством ключей, поскольку ключи в \texttt{hstore} чувствительны к регистру.
+\end{itemize}
+
+Чтобы получить значение ключа, используйте оператор \texttt{->}. Для добавления в \texttt{hstore} служит оператор конкатенации \texttt{||}, а для удаления пары ключ-значение -- оператор \verb|-|. Для обновления хранилища \texttt{hstore} следует конкатенировать его с другим экземпляром \texttt{hstore}, который содержит новое значение.
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+CREATE TABLE features(
+    feature hstore
+);
+\end{lstlisting}
+
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+-- вставить в виртуальную таблицу пару <<ключ : значение>>
+-- и вернуть эту пару с помощью RETURNING
+postgres=# INSERT INTO features(feature) VALUES ('Engine=>Diesel'::hstore) RETURNING *;
+\end{lstlisting}
+
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+-- добавить новую пару <<ключ : значение>>
+UPDATE features SET feature = feature || 'Seat=>Lether'::hstore RETURNING *;
+\end{lstlisting}
+
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+-- обновление значения для ключа, существующего в хеш-таблице, аналогично добавлению пары
+-- если ключ есть в хеш-таблице, то его значение обновляется
+UPDATE features SET feature = feature || 'Engine=>Petrol'::hstore RETURNING *;
+\end{lstlisting}
+
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+-- удаление ключа
+UPDATE features SET feature = feature - 'Seat'::text RETURNING *;
+\end{lstlisting}
+
+Тип данных \texttt{hstore} преобразуется во множество с помощью функции \texttt{each(hstore)}, и это открывает перед разработчиком возможность применять к \texttt{hstore} все операции реляционной алгебры, например, \texttt{DISTINCT}, \texttt{GROUP BY} и \texttt{ORDER BY}.
+
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+-- получить уникальные ключи
+SELECT DISTINCT (each(feature)).key FROM features;
+\end{lstlisting}
+
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+-- получить пары
+SELECT DISTINCT (each(feature)).* FROM features;
+\end{lstlisting}
+выведет
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
++-------------+------------+
+|     key     |   value    |
++-------------+------------+
+| CAE-package | Ansys      |
+| Language    | IronPython |
+| Solver type | Direct     |
++-------------+------------+
+\end{lstlisting}
+
+\subsection{Индексирование hstore}
+
+Для индексирования данных типа \texttt{hstore} можно воспользоваться индексами GIN и GIST, а какой именно выбрать зависит от ряда факторов: количества строк в таблице, наличного места, требуемой производительности поиска и обновления по индексу, характера запросов и т.д. 
+
+Прежде чем остановится на том или ином индексе, нужно провести тщательное эталонное тестирование.
+
+Сначала создадим GIN-индекс для выборки записи по ключу
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+CREATE INDEX ON features USING GIN(feature);
+\end{lstlisting}
+
+Проверить содержит ли хранилище заданный ключ можно с помощью оператора \verb|?|, вывести значение по ключу с помощью оператора \verb|->| (поддерживаются только одинарные кавычки)
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+-- выводит значения по заданному ключу для тех строк, в которых хранится хеш-таблица, в которой содержится ключ 'Language'
+SELECT feature->'Language'
+FROM features
+WHERE feature ? 'Language';
+\end{lstlisting}
+
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+-- выводит значения по заданному ключу для тех строк, в которых есть хеш-таблица с ключом 'Solver' и значением, которое начинается на 'dir'
+SELECT feature->'Solver'
+FROM features
+WHERE feature->'Solver' ~* 'dir.*';
+\end{lstlisting}
+
+Еще пример на использование оператора \verb|->|
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+CREATE TABLE hstore_doc(
+  id serial primary key,
+  doc hstore
+);
+INSERT INTO hstore_doc(doc) VALUES ('"solver type"=>direct,"package name"=>Ansys,language=>IronPython');
+INSERT INTO hstore_doc(doc) VALUES ('"solver type"=>iterative,"package name"=>Nastran,language=>C++'::hstore);
+INSERT INTO hstore_doc(doc) VALUES ('language=>Java,"package name"=>Abaqus')
+SELECT -- при обращении по ключу поддерживаются только одинарные кавычки
+  doc->'solver type' AS "solver type",
+  doc->'package name' AS "package name"
+FROM hstore_doc;
+\end{lstlisting}
+выведет
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
++-------------+--------------+
+| solver type | package name |
++-------------+--------------+
+| direct      | Ansys        |
+| iterative   | Nastran      |
+| <NULL>      | Abaqus       |
++-------------+--------------+
+\end{lstlisting}
+
+Пример на использование оператора \verb|?|
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT
+  doc->'solver type' AS "solver type",
+  doc->'package name' AS "package name"
+FROM hstore_doc
+WHERE doc ? 'solver type'; -- те строки, в которых есть хранилище с ключом 'solver type'
+\end{lstlisting}
+
+
+
+
+Разумеется, если некотрый оператор не поддерживает GIN-индексом, как, например, оператор \verb|->|, можно использовать и индекс типа B-tree
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+CREATE INDEX ON features ((feature->'Engine'))
+\end{lstlisting}
+
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT feature->'Engine'
+FROM features
+WHERE feature->'Engine' = 'Diesel'; -- значение, возвращенное по заданному ключу,
+                                    -- сравнивается с 'Diesel'
+\end{lstlisting}
+
+\section{Структура данных JSON}
+
+JSON -- универсальная структура данных, понятная как человеку, так и машине. Она поддерживается почти всеми современными языками программирования и повсеместно применяется в качестве формата обмена данными в REST-совместимых веб-службах.
+
+\subsection{JSON и XML}
+
+И XML, и JSON используются для определения структуры данных передаваемых документов. Грамматически JSON проще, чем XML, вследствие чего JSON-документы компактнее и проще для чтения и написания. 
+
+\subsection{Типы данных JSON в PostgreSQL}
+
+PostgreSQL поддерживает два типа JSON: \texttt{JSON} и \texttt{JSONB}, тот и другой реализуют спецификацию RFC 7159. Оба типа применимы для контроля правил JSON. Они почти идентичны, но \texttt{JSONB} эффективнее, потому что является двоичным форматом и поддерживает индексы.
+
+При работе с типом JSON рекомендуется задавать для базы данных кодировку UTF8, чтобы обеспечить его совместимость со стандартом RFC 7159. Документ, сохраняемый как объект типа \texttt{JSON}, хранится в текстовом формате. Если же объект храниться как \texttt{JSONB}, то примитивные типы JSON -- \texttt{string}, \texttt{boolean}, \texttt{number} -- отображаются, соотвественно, на типы \texttt{text}, \texttt{Boolean} и \texttt{numeric}.
+
+\subsection{Доступ к объектам типа JSON и их модификация}
+
+Если текст приводится к типу json, то он сохраняется и отображаются без какой-либо обработки, поэтому сохраняются все пробелы, форматирование чисел и другие детали. В формате jsonb эти детали не сохраняются.
+
+JSON-объекты могут содержать вложенные JSON-объекты, массивы, вложенные массивы, массивы JSON-объектов и т.д. Глубина вложенности произвольна, так что можно конструировать весьма сложные JSON-документы. В одном массиве JSON-документа могут находится элементы разных типов
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT '{
+  "name" : "John",
+  "Address" : {"Street" : "Some street",
+               "city" : "Some city"},
+  "rank" : [5,3,4,5,2,3,4,5]
+}'::jsonb;
+\end{lstlisting}
+
+Можно получить поле JSON-объекта в виде JSON-объекта или текста. К полям можно также обращаться по индексу или по имени поля:
+\begin{itemize}
+	\item \verb|->| (для JSON), \verb|->>| (для текста): возвращает поле JSON-объекта по индексу или по имени поля,
+	
+	\item \verb|#>| (для JSON), \verb|#>>| (для текста): возвращает поле JSON-объекта по указанному пути.
+\end{itemize}
+
+Пример
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+CREATE TABLE json_doc( doc jsonb );
+INSERT INTO json_doc SELECT
+  '{"name" : "John",
+    "Address" : {
+      "Street" : "Some street",
+      "city" : "Some city"
+    },
+    "rank" : [5,3,4,5,2,3,4,5]
+   }'::jsonb;
+\end{lstlisting}
+
+Если требуется вернуть города 
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT doc->'Address'->>'city', doc#>>'{Address,city}' FROM json_doc;
+\end{lstlisting}
+
+Вставить в JSON-объект пару ключ-значение
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+UPDATE json_doc SET doc = jsonb_insert(doc, '{hobby}', '["swim", "read"]', true) RETURNING *;
+\end{lstlisting}
+
+А вот так изменяется существующая пара ключ-значение
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+UPDATE json_doc SET doc = jsonb_set(doc, '{hobby}', '["read"]', true) RETURNING *;
+\end{lstlisting}
+
+И наконец, удалим пару ключ-значение
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+UPDATE json_doc SET doc = doc - 'hobby' RETURNING *;
+\end{lstlisting}
+
+\subsection{Индексирование JSON-документов}
+
+Для индексирования JSONB-документов используется GIN-индекс, который поддерживает следующие операторы:
+\begin{itemize}
+	\item \verb|@>|: содержит ли JSON-документ в левой части значение в правой части,
+	
+	\item \verb|?|: существует ли указанный ключ в JSON-документе,
+	
+	\item \verb|?&|: существует ли в JSON-документе хотя бы один из элементов текстового массива,
+	
+	\item \texttt{?|}: существуют ли в JSON-документе все элементы текстового массива (ключи).
+\end{itemize}
+
+Содержит ли JSON-объект указанную пару <<ключ-значение>>
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT '{ "package name" : "Ansys", "solver type" : "direct" }'::jsonb @> '{ "package name" : "Ansys" }'::jsonb; -- t
+\end{lstlisting}
+
+JSON-документ можно преобразовать во множество с помощью функции \texttt{json\_to\_record()}. Это полезно, потому что позволяет сортировать данные, как в обычных хранилищах. Кроме того, можно агрегировать данные из нескольких строк и сконструировать массив JSON-объектов с помощью функции \texttt{json\_agg()}.
+
 
 \section{PostgreSQL и Python}
 
@@ -2691,6 +3363,216 @@ EXECUTE format('SELECT count(*) FROM %I '
 Команда \texttt{EXECUTE} с неизменяемым текстом и параметрами \texttt{USING}, функционально эквивалентна команде, записанной напрямую в PL/pgSQL, в которой переменные PL/pgSQL автоматически заменяются значениями. Важное отличие в том, что \texttt{EXECUTE} при каждом исполнении \emph{заново} строит план команды с учетом текущих значений параметров, тогда как PL/pgSQL строит \emph{общий план} выполнения и \emph{кеширует} его при повторном использовании. В тех случаях, когда наилучший план выполнения сильно зависит от значений параметров, может быть полезно использовать \texttt{EXECUTE} для \emph{гарантии} того, что не будет выбран общий план.
 
 Указание \verb|%I| равнозначно вызову \texttt{quote\_ident}, а \verb|%L| -- вызову \texttt{quote\_nullable}. 
+
+\subsection{Функции и операторы JSON}
+
+Рассмотрим примеры использования операторов для типов \texttt{json} и \texttt{jsonb}
+\begin{lstlisting}[
+style = sql, 
+numbers = none
+]
+-- можно указаывать имя ключа в json-объекте или номер этого элемента
+-- нумерация начинается с 0
+SELECT '[
+   { "solver type" : ["direct", "iterative"]},
+   { "package name" : "Ansys" }
+]'::json->0->'solver type'->>1; -- iterative
+\end{lstlisting}
+
+Использование нотации пути
+\begin{lstlisting}[
+style = sql, 
+numbers = none
+]
+SELECT '[
+  { "solver type" : ["direct", "iterative"]},
+  { "package name" : "Ansys" }
+]'::json #>> '{0, "solver type",1}'; -- iterative
+\end{lstlisting}
+
+Примеры использования дополнительных операторов \texttt{jsonb}
+\begin{lstlisting}[
+style = sql, 
+numbers = none
+]
+-- содержет ли левый json-объект правый json-объект
+SELECT '{
+  "solver type" : [ "iterative", "direct" ],
+  "package name" : "Ansys"
+}'::jsonb @> '{ "solver type" : [ "iterative" ] }'::jsonb; -- t
+\end{lstlisting}
+
+\begin{lstlisting}[
+style = sql, 
+numbers = none
+]
+-- содержется ли левый json-объект в правом
+SELECT '{ "package name" : "Ansys" }'::jsonb <@ '{ "package name" : "Ansys", "solver type" : "direct" }'::jsonb;
+\end{lstlisting}
+
+\begin{lstlisting}[
+style = sql, 
+numbers = none
+]
+-- присутствует ли ключ в формате СТРОКИ в данном json-объекте
+SELECT '{ "package name" : "Nastran",
+          "solver type" : [ "iterative", "direct" ] }'::jsonb ? 'solver type'; -- t
+\end{lstlisting}
+
+\begin{lstlisting}[
+style = sql, 
+numbers = none
+]
+-- содержет ли данный json-объект ХОТЯ БЫ один элемент из указанного массива СТРОК
+SELECT '{
+  "package name" : "Abaqus",
+  "solver type" : "direct"
+}'::jsonb ?| '{"package name","solver type"}'::text[];
+\end{lstlisting}
+
+\begin{lstlisting}[
+style = sql, 
+numbers = none
+]
+-- содержет ли данный json-объект ВСЕ элемент из указанного массива СТРОК
+SELECT '{
+  "package name" : "Abaqus",
+  "solver type" : "direct"
+}'::jsonb ?& '{"package name","solver type"}'::text[];
+\end{lstlisting}
+
+\begin{lstlisting}[
+style = sql, 
+numbers = none
+]
+-- удаляет пару ключ/значение или элемент-СТРОКУ из левого операнда 
+SELECT '{
+  "package name" : "Abaqus",
+  "solver type" : "direct"
+}'::jsonb - 'solver type';
+\end{lstlisting}
+
+\begin{lstlisting}[
+style = sql, 
+numbers = none
+]
+-- удаляет поле или элемент с заданным путем
+SELECT '{
+  "package name" : "Abaqus",
+  "solver type" :
+    {
+      "direct" : "Java",
+      "iterative" : "IronPython"
+    }
+}'::jsonb #- '{"solver type","iterative"}'::text[];
+\end{lstlisting}
+
+Чтобы убедиться в том, что найден правильный элемент json-объект, следует сначала воспользоваться оператором \verb|#>|, а уже потом оператором \verb|#-|.
+
+Функции \texttt{json\_each()} и \texttt{jsonb\_each()} разворачивают внешний объект JSON в набор пар ключ/значение
+\begin{lstlisting}[
+style = sql, 
+numbers = none
+]
+SELECT * FROM jsonb_each(
+  '{
+      "package name" : "Abaqus",
+      "solver type" : { "direct" : "Java", "iterative" : "IronPython" }
+   }'::jsonb #- '{"solver type", "direct"}'::text[]
+);
+\end{lstlisting}
+выведет
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
++--------------+-----------------------------+
+|     key      |            value            |
++--------------+-----------------------------+
+| solver type  | {"iterative": "IronPython"} |
+| package name | "Abaqus"                    |
++--------------+-----------------------------+
+\end{lstlisting}
+
+Для того чтобы развернуть внешний объект JSON в набор пар ключ/значение в текстовом формате, следует воспользоваться функциями \texttt{json\_each\_text()} и \texttt{jsonb\_each\_text()}.
+
+Ключи JSON-объекта можно вернуть так
+\begin{lstlisting}[
+style = sql, 
+numbers = none
+]
+-- выведет ключи JSON-объекта верхнего уровня
+SELECT jsonb_object_keys(
+  '{
+      "package name" : "Nastran",
+      "solver type" : { "direct" : "Java", "iterative" : "IronPython" }   
+   }'::jsonb #- '{"solver type",direct}'::text[]
+);
+\end{lstlisting}
+
+\emph{Обновить} или \emph{создать новый} элемент JSON-объект можно так
+
+\begin{lstlisting}[
+style = sql, 
+numbers = none
+]
+-- заменит `direct` на `DIRECT`, так как `create_missing` = false
+SELECT jsonb_set(
+  '{
+    "package name" : "Ansys",
+    "solver type" : [ "direct", "iterative" ]
+   }'::jsonb, -- где меняем
+  '{"solver type",0}'::text[], -- путь в json-объекте
+  '"DIRECT"'::jsonb, -- на что меняем
+  false -- обновляем значение
+  -- true -- добавляем новое значение
+);
+\end{lstlisting}
+
+\begin{lstlisting}[
+style = sql, 
+numbers = none
+]
+-- добавит новое значение `NEW TYPE` в `solver type`, так как в этом ключе нет элемента с номером позиции 2, а `create_missing` = true
+SELECT jsonb_set(
+  '{
+    "package name" : "Ansys",
+    "solver type" : [ "direct", "iterative" ]
+   }'::jsonb, -- где меняем
+  '{"solver type",2}'::text[], -- путь в json-объекте
+  '"NEW TYPE"'::jsonb, -- на что меняем
+  true -- добавляем новое значение
+);
+\end{lstlisting}
+
+Для того чтобы упростить восприятие сложных JSON-объектов служит функция \texttt{json\_pretty()}
+\begin{lstlisting}[
+style = sql, 
+numbers = none
+]
+SELECT * FROM jsonb_pretty(
+  '{ "pretty name" : "Ansys",
+     "solver type" : [ "direct", "iteractive" ]
+   }'::jsonb
+) AS "json object";
+\end{lstlisting}
+выведет
+\begin{lstlisting}[
+style = cmd,
+numbers = none
+]
++-----------------------------+
+|         json object         |
++-----------------------------+
+| {                          +|
+|     "pretty name": "Ansys",+|
+|     "solver type": [       +|
+|         "direct",          +|
+|         "iteractive"       +|
+|     ]                      +|
+| }                           |
++-----------------------------+
+\end{lstlisting}
 
 
 

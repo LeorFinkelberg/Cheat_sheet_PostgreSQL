@@ -1450,6 +1450,119 @@ numbers = none
 
 То есть конструкция \texttt{DISTINCT ON} выполняет группировку по указанному атрибуту. И фраза \texttt{ORDER BY} не обязательна.
 
+\section{Пользовательские типы данных}
+
+В PostgreSQL есть два способа определить пользовательский тип данных:
+\begin{itemize}
+	\item команда \texttt{CREATE DOMAIN}: позволяет создавать пользовательские типы данных с ограничениями с целью сделать исходный код более модульным,
+	
+	\item команда \texttt{CREATE TYPE}: часто используется для создания составного типа, что полезно в процедурных языках, где такие типы служат для возврата значений. Эта же команда может создавать тип \texttt{ENUM}, позволяющий уменьшить количество соединений со справочными таблицами.
+\end{itemize}
+
+Объекты доменов, как и другие объекты базы данных, должны иметь уникальные имена в пределах схемы. Основное применение доменов -- в качестве образцов. Рассмотрим, к примеру, текстовый тип, который не может принимать значение \texttt{NULL} и содержать пробелы. Это образец.
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+first_name TEXT NOT NULL,
+last_name TEXT NOT NULL,
+CHECK(first_name !~ '\s' AND last_name !~ '\s')
+\end{lstlisting}
+
+Вместо ограничений можно создать домен
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+CREATE DOMAIN text_without_space_and_null AS TEXT NOT NULL CHECK (value !~ '\s');
+\end{lstlisting}
+
+Теперь этот домен можно использовать при создании таблиц
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+CREATE TABLE test_domain(
+  test_att text_without_space_and_null
+);
+\end{lstlisting}
+
+Домен можно изменить командой \texttt{ALTER DOMAIN}. Если в домен добавляется новое ограничение, то все атрибуты, определенные с помощью этого домена, будут проверены на соблюдение этого ограничения. При желании проверку старых значений можно подавить, а затем почистить таблицы вручную. Допустим, что мы хотим добавить в домен \verb|text_without_space_and_not_null| ограничение на длину текста
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+ALTER DOMAIN text_without_space_and_null ADD CONSTRAINT text_without_space_and_null_length_chk CHECK (length(value) <= 15);
+\end{lstlisting}
+
+Эта команда завершиться неудачно, если какой-нибудь атрибут, принадлежащий этому домену, длиннее 15 символов. Если мы хотим все же применить ограничение к новым данным, а старые пока оставить как есть, то это можно сделать
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+-- указание NOT VALID допускается только для ограничений CHECK
+ALTER DOMAIN text_without_space_and_null
+ADD CONSTRAINT
+  -- указывается имя ограничения
+  text_without_space_and_null_length_chk CHECK (length(value) <= 15) NOT VALID;
+\end{lstlisting}
+
+После вычистки старых данных можно будет проверить для них ограничение, выполнив команду \texttt{ALTER DOMAIN ... VALIDATE CONSTRAINT}.
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+ALTER DOMAIN
+  text_without_space_and_null -- имя существующего домена
+VALIDATE CONSTRAINT
+  text_without_space_and_null_length_chk; -- имя ограничения
+\end{lstlisting}
+
+Наконец, метакоманда \verb|psql \dD+| выводит описание домена.
+
+Составные типы данных очень полезны для создания функций, особенно когда возвращаемый тип представляет собой строку из нескольких значений. Например, нам нужно функция, возвращающая \verb|seller_id|, \verb|seller_name|, количество объявлений и полный ранг продавца. Создадим новый тип
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+CREATE TYPE seller_information AS (seller_id INT, seller_name TEXT, number_of_advertisements BIGINT, total_rank FLOAT);
+\end{lstlisting}
+
+Воспользуемся новым типом данных для возврата значения из функции
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+CREATE OR REPLACE FUNCTION seller_information(account_id INT)
+RETURNS seller_information AS
+$$
+SELECT seller_account.seller_account_id, first_name || last_name AS seller_name, count(*), sum(rank)::float/count(*)
+FROM account
+INNER JOIN
+  seller_account ON account.account_id = seller_account.account_id
+LEFT JOIN
+  advertisement ON advertisement.seller_account_id = seller_account.seller_account_id
+LEFT JOIN
+  advdertisement_rating ON advertisement.advertisement_id = advertisement_rating.advertisement_id
+WHERE account.account_id = $1
+GROUP BY seller_account.seller_account_id, first_name, last_name
+$$ LANGUAGE sql;
+\end{lstlisting}
+
+Команду \texttt{CREATE TYPE} можно использовать также для определения перечисления \texttt{ENUM}
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+-- создать составной тип
+CREATE TYPE rank AS ENUM ('poor', 'fair', 'good', 'very good', 'excellent');
+-- вывести описание типа перечисления
+SELECT enum_range(null::rank);
+\end{lstlisting}
+
+Теперь в столбец с типом \texttt{rank} можно будет вставить только значение из списка, указанного в описании типа \texttt{rank}.
+
+
 
 \section{Работа со строками и регулярные выражения}
 

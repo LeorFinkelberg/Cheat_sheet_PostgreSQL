@@ -199,7 +199,7 @@ pg_ctl restart -D '/c/Program Files/PostgreSQL/11/data'
 style = cmd,
 numbers = none
 ]
-pg_ctl start -D "C:\Program Files\PostgreSQL\11\data"
+pg_ctl restart -D "C:\Program Files\PostgreSQL\11\data"
 \end{lstlisting}
 
 А посмотреть статус можно так
@@ -209,6 +209,8 @@ numbers = none
 ]
 pg_ctl status -D "C:\Program Files\PostgreSQL\11\data"
 \end{lstlisting}
+
+Для справки все изменения (например, изменение номера порта), вносимые в файл \texttt{postgresql.conf} требуют перезапуска сервера, т.е. \verb|pg_ctl restart -D "C:\Prog...\data"|.
 
 
 \section{Сброс пароля для \texttt{psql} и \texttt{pgAdmin4}}
@@ -831,7 +833,27 @@ WHERE
 
 В конструкциях общих табличных выражений с \texttt{WITH} имена временных таблиц указываются \emph{без} перечисления имен столбцов, а в конструкциях с \texttt{WITH RECURSIVE} -- с перечислением, например, \lstinline[style=sql]{WITH RECURSIVE tab(col1, col2, ...) AS (...)}.
 
-Ссылки на общие табличные выражения в главном запросе можно трактовать как имена таблиц. PostgreSQL выполняет общее табличное выражение \emph{только один раз}, кеширует результаты, а затем повторно использует, вместо того чтобы выполнять подзапросы всякий раз, как они встречаются в главном запросе \cite[\strbook{169}]{juba:2019}.
+Ссылки на общие табличные выражения в главном запросе можно трактовать как имена таблиц. PostgreSQL выполняет общее табличное выражение \emph{только один раз}, кеширует результаты, а затем повторно его использует, вместо того чтобы выполнять подзапросы всякий раз, как они встречаются в главном запросе \cite[\strbook{169}]{juba:2019}.
+
+Порядок выполнения CTE не определен. Цель PostgreSQL -- выполнить \emph{главный запрос}. Если в нем есть ссылки на CTE, то PostgreSQL выполняет сначала их. Если на CTE типа \texttt{SELECT} нет ни прямых, ни косвенных ссылок из главного запроса, то оно не выполняется вовсе. Подкоманды, \emph{изменяющие} данные, выполняются \emph{всегда}.
+
+В PostgreSQL~12 по умолчанию CTE \emph{не материализуются}! В нематериализованных CTE используются индексы.
+
+Теперь есть возможность выбирать поведение CTE в зависимости от контекста
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+WITH temp_tbl AS MATERIALIZED (
+   ...
+)
+-- или 
+WITH temp_tbl AS NOT MATERIALIZED (
+   ...
+)
+\end{lstlisting}
+
+Однако, если CTE используется несколько раз, то оно будет материализовано. Чтобы этого избежать, следует явно указывать \texttt{NOT MATERIALIZED}.
 
 \subsection{Конструкция \texttt{WITH}}
 
@@ -3802,6 +3824,290 @@ numbers = none
 +-----------------------------+
 \end{lstlisting}
 
+\section{Приемы работы с \texttt{JSONPATH}}
+
+\subsection{Элементы языка \texttt{SQL/JSONPATH}}
+
+В PostgreSQL <<путевые выражения>> реализованны как тип данных \texttt{jsonpath} и потому может использоваться для описания объектов.
+
+Рассмотрим пример
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT jsonb_path_query( -- специальная функция для построения JSON-запроса
+  '{
+      "track" : {
+        "segments" : [
+          {
+            "location" : [ 47.763, 13.4034 ],
+            "start time" : "2018-10-14 10:05:14",
+            "HR" : 73
+          },
+          {
+            "location" : [ 47.706, 13.2635 ],
+            "start time" : "2018-10-14 10:39:21",
+            "HR" : 135
+          }
+        ]
+     }
+   }'::jsonb, -- целевой JSONB-объект
+'$.track.segments[*] ? (@.HR > 100)."start time"' -- "2018-10-14 10:39:21"
+);
+\end{lstlisting}
+
+Можно задавать \emph{цепочку условий}
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+select jsonb_path_query(
+  '{
+     "track" : {
+       "segments" : [
+         {
+           "location" : [ 47.763, 13.4034 ],
+           "start time" : "2018-10-14 10:05:14",
+           "HR" : 73
+         },
+         {
+           "location" : [ 47.706, 13.2635 ],
+           "start time" : "2018-10-14 10:39:21",
+           "HR" : 135
+         }
+       ]
+    }
+  }'::jsonb,
+'$.track.segments[*] ? (@.location[1] > 13.35) ? (@.HR > 70)."start time"' -- "2018-10-14 10:05:14"
+);
+\end{lstlisting}
+
+Также допускается использование выражений фильтра на разных уровнях вложенности. Следующий пример сначала фильтрует все сегменты по местоположению, а затем возвращает высокие значения частоты сердечных сокращений для этих сегментов, если они доступны
+
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+select jsonb_path_query(
+  '{
+	 "track" : {
+	   "segments" : [
+	     {
+          "location" : [ 47.763, 13.4034 ],
+          "start time" : "2018-10-14 10:05:14",
+          "HR" : 73
+	     },
+	     {
+	       "location" : [ 47.706, 13.2635 ],
+	       "start time" : "2018-10-14 10:39:21",
+	       "HR" : 135
+	     }
+	   ]
+	}
+  }'::jsonb,
+  '$.track.segments[*] ? (@.location[1] > 13.35).HR ? (@ > 70)'
+);
+\end{lstlisting}
+
+В JSON-путях поддерживается два режима:
+\begin{itemize}
+	\item \texttt{lax} -- неявно преобразует запрашиваемые данные к указанному пути, подавляя структурные ошибки,
+	
+	\item \texttt{strict} -- в случае появления структурной ошибки, выводит сообщение об ошибке.
+\end{itemize}
+
+Пример
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+-- выведет сообщение об ошибке, т.к. индекс массива вне диапазона
+SELECT jsonb_path_query(
+    '{ "a" : [ 10, 20, 30 ] }'::jsonb,
+    'strict $.a[3] ? (@ > 20)'
+);
+\end{lstlisting}
+
+С помощью фильтра \verb|like_regex| поддерживаются регулярные выражения
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT jsonb_path_query(
+  '{
+     "track" : {
+       "segments" : [
+         {
+           "location" : [ 47.763, 13.4034 ],
+           "start time" : "2018-10-14 10:05:14",
+           "HR" : 73
+         },
+         {
+           "location" : [ 47.706, 13.2635 ],
+           "start time" : "2018-10-14 10:39:21",
+           "HR" : 135
+         }
+       ],
+      "package name" : [ "Ansys", "Nastran", "Abaqus" ]
+     }
+   }'::jsonb,
+   '$.track."package name" ? (@ like_regex "^a[bn].*" flag "i")'
+); -- "Ansys", "Abaqus"
+\end{lstlisting}
+
+\subsection{Элементы языка \texttt{JsQuery}}
+
+\texttt{JsQuery} -- язык запросов к типу данных JSONB. Основное предназначение -- предоставить дополнительную функциональность для JSONB, например, простой и эффективный способ поиска во вложенных объектах и массивах, а также дополнительные операторы сравнения с поддержкой индексов.
+
+Установить расширение \texttt{jsquery} можно так
+\begin{lstlisting}[
+style = bash,
+numbers = none
+]
+CREATE EXTENSION jsquery;
+\end{lstlisting}
+ 
+
+
+\subsection{Примеры конструкций с \texttt{JSONPATH}}
+
+В PostgreSQL 12 появились несколько новых функций и операторов, упрощающих работу с JSON-объектами.
+
+Пример на использование оператора \verb|@?| (\emph{оператора существования})
+\begin{lstlisting}[
+style = sql, 
+numbers = none
+]
+-- проверка на условие в круглых скобках
+SELECT '{ "a" : [ 1,2,3,4,5], "b" : 100 }'::jsonb @? '$.a[*] ? (@ < 1)'; -- t
+\end{lstlisting}
+
+Здесь, если хотя бы для одного элемента массива \verb|[...]| выполняется условие \verb|(@ < 1)|, то возвращается \texttt{true}.
+
+Существует еще \emph{оператор совпадения} \verb|@@|
+\begin{lstlisting}[
+style = sql, 
+numbers = none
+]
+SELECT '[ 1,2,3 ]'::jsonb @@ '$[*] == 3' -- true
+\end{lstlisting}
+
+Подобные задачи еще можно решить с помощью специальной функции \verb|jsonb_path_exists|
+\begin{lstlisting}[
+style = sql, 
+numbers = none
+]
+SELECT jsonb_path_exists(
+  '{ "a" : [ 1,2,3,4,5 ] }'::jsonb,  -- целевой JSON-объект
+  '$.a[*] ? (@ => $min && @ <= $max)',  -- JSON-путь 
+  '{ "min" : 2, "max" : 4}' -- пользовательские переменные
+);
+-- или с помощью @?
+SELECT '{ "a" : [ 1,2,3,4,5 ] }'::jsonb @? '$.a[*] ? ( @ >= 2 && @ <= 4)';
+\end{lstlisting}
+
+Еще пример на использование оператора \verb|@?|
+\begin{lstlisting}[
+style = sql, 
+numbers = none
+]
+SELECT '{ "package name" : "Ansys",
+          "solver type" : [ "direct", "iterative" ]
+        }'::jsonb @? '$."solver type"[*] ? (@ == "derict")'; -- true
+\end{lstlisting}
+
+Эту задачу можно было бы решить и так
+\begin{lstlisting}[
+style = sql, 
+numbers = none
+]
+SELECT jsonb_path_exists(
+  '{ "package name" : "Ansys",
+     "solver type" : [ "direct", "iterative " ]
+   }'::jsonb, -- целевой JSON-объект
+  '$."solver type"[*] ? (@ == $var)', -- JSON-путь
+  '{ "var" : "direct" }'::jsonb -- пользовательская переменная
+);
+\end{lstlisting}
+
+Вывести элементы JSON-объекта, отвечающие заданному условию, можно так
+\begin{lstlisting}[
+style = sql, 
+numbers = none
+]
+SELECT jsonb_path_query AS res FROM jsonb_path_query(
+   '{ "a" : [ 1,2,3,4,5 ] }'::jsonb,
+   '$.a[*] ? (@ >= $min && @ <= $max)',
+   '{ "min" : 2, "max" : 4 }'::jsonb
+);
+\end{lstlisting}
+выведет
+\begin{lstlisting}[
+style = cmd, 
+numbers = none
+]
+res|
+---|
+2  |
+3  |
+4  |
+\end{lstlisting}
+
+Получить сгруппированный вариант в формате JSONB можно так
+\begin{lstlisting}[
+style = sql, 
+numbers = none
+]
+SELECT jsonb_path_query_array AS res FROM jsonb_path_query_array(
+  '{ "a" : [ 1,2,3,4,5 ] }'::jsonb,
+  '$.a[*] ? (@ >= $min && @ <= $max)',
+  '{ "min" : 2, "max" : 4 }'::jsonb
+);
+\end{lstlisting}
+
+Аналогично можно использовать различные математические операторы
+\begin{lstlisting}[
+style = sql, 
+numbers = none
+]
+-- оператор взятия остатка от деления
+SELECT jsonb_path_query('[9]'::jsonb, '$[0] % 2'); -- 1
+\end{lstlisting}
+
+Округление в меньшую сторону
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT jsonb_path_query(
+  '{ "x" : [ 2.85, -14.7, -9.4 ] }'::jsonb,
+  '+ $.x.floor()
+);
+\end{lstlisting}
+
+То же самое с обращением знака
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT jsonb_path_query(
+  '{ "x" : [ 2.85, -14.7, -9.4 ] }'::jsonb,
+  '- $.x.floor()
+);
+\end{lstlisting}
+
+Выбрать из JSON-объекта только те CAE-пакеты, имена которых без учета регистра начинаются с символа \texttt{a}, затем идет либо символ \texttt{b}, либо \texttt{n}, а затем произвольная последовательность символов
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+-- шаблон: структура JSON-объекта ? (условие)
+SELECT jsonb_path_query(
+  '{ "package name" : [ "Ansys", "Nastran", "Abaqus", "Comsole" ] }'::jsonb,
+  '$."package name" ? (@ like_regex "^a[bn].*" flag "i")'
+);
+\end{lstlisting}
+
 
 
 \section{Наиболее полезные команды PostgreSQL}
@@ -3810,7 +4116,7 @@ numbers = none
 
 Команда \texttt{VACUUM} предназначена для сборки мусора и, возможно, для анализа базы данных. \texttt{VACUUM} высвобождает пространство, занятое <<мертвыми>> кортежами. При обычных операциях кортежи, удаленные или устаревшие в результате обновления, физически не удаляются из таблицы. Они сохраняются в ней, и ждут выполнения команды \texttt{VACUUM}. Таким образом, периодически необходимо выполнять \texttt{VACUUM}, особенно для часто изменяемых таблиц.
 
-Без параметра команда \texttt{VACUUM} обрабатывает \emph{все таблицы} текущей базы данных, которые может очистить текущий пользователь. Если в параметре передается имя таблицы, то \texttt{VACUUM} обрабатывает только эту таблицу.
+Без параметра команда \texttt{VACUUM} обрабатывает \emph{все таблицы} текущей базы данных, которые может очистить текущий пользователь. Если в параметре передается \emph{имя таблицы}, то \texttt{VACUUM} обрабатывает \emph{только эту таблицу}.
 
 Конструкция \texttt{VACUUM ANALYZE} выполняет очистку, а затем анализ всех указанных таблиц. Параметр \texttt{ANALYZE} обновляет статистическую информацию по таблицам, которую использует планировщик при выборе наиболее эффективного способа выполнения запроса. Это удобная комбинация для регулярного обслуживания БД.
 

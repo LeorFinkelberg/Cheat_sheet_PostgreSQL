@@ -3651,6 +3651,23 @@ $ psql -U postgres -d postgres -P format=latex \
     -o for_latex_output.txt
 \end{lstlisting}
 
+Вывести путь до каталога данных
+\begin{lstlisting}[
+style = bash,
+numbers = none	
+]
+$ psql -U postgres -c 'show data_directory;'
+# /Users/leor.finkelberg/Library/Application Support/Postgres/var-11 
+\end{lstlisting}
+
+Вывести версию Postgres
+\begin{lstlisting}[
+style = bash,
+numbers = none	
+]
+psql -U postgres -c 'select version();'
+\end{lstlisting}
+
 
 
 \section{Специальные функции и операторы}

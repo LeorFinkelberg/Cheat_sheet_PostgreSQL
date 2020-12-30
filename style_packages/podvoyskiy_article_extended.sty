@@ -190,7 +190,8 @@
 	Python,
 	Fortran,
 	command.com,
-	[LaTeX]TeX
+	[LaTeX]TeX,
+	bash
 }  % поддерживаемые языки
 
 % локальные настройки подсветки синтаксиса IronPython Workbench
@@ -209,6 +210,15 @@
 	commentstyle = \color{red}\itshape,  % коментарии зеленым цветом, курсив
 	morestring=[s]{'''}{'''},
 	morestring=[s]{"""}{"""}
+}
+
+
+\lstdefinestyle{bash}{%
+    language = bash,
+    basicstyle = \fontsize{10pt}{10pt}\ttfamily,
+    %keywordstyle = \color{deeppurple},
+    stringstyle = \color{deepgreen},
+    commentstyle = \color{red}\itshape
 }
 
 % локальные настройки подсветки синтаксиса cmd

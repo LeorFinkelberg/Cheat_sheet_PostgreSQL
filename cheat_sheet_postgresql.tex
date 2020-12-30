@@ -210,7 +210,7 @@ WHERE name = 'shared_buffers';
 \end{lstlisting}
 
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +---------+------+
@@ -232,14 +232,14 @@ numbers = none
 
 Для справки перезапустить сервер на Windows, используя командную оболочку \texttt{bash}, можно с помощью утилиты \verb|pg_ctl|\footnote{Еще перезагрузить кластер после внесения изменений в файл \texttt{pg\_hba.conf} или \texttt{postgresql.conf} можно с помощью функции \texttt{pg\_reload\_conf()}} так
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 pg_ctl restart -D '/c/Program Files/PostgreSQL/11/data'
 \end{lstlisting}
 или так, если использовать \texttt{cmd.exe}
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 pg_ctl restart -D "C:\Program Files\PostgreSQL\11\data"
@@ -247,7 +247,7 @@ pg_ctl restart -D "C:\Program Files\PostgreSQL\11\data"
 
 А посмотреть статус можно так
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 pg_ctl status -D "C:\Program Files\PostgreSQL\11\data"
@@ -296,7 +296,7 @@ FROM pg_database;
 \end{lstlisting}
 выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +-----------+---------+
@@ -336,7 +336,7 @@ LIMIT 2;
 
 Рассмотрим пример плана выполнения запроса
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 --------------------------------------------------------------------
@@ -351,7 +351,7 @@ Seq Scan on <table_name> (cost=0.00..1834.00 rows=100000 width=37)
 
 Выполнить запрос и вывести его план можно и так
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 EXPLAIN (ANALYZE, FORMAT YAML, BUFFERS) SELECT * FROM <table_name>;
@@ -359,7 +359,7 @@ EXPLAIN (ANALYZE, FORMAT YAML, BUFFERS) SELECT * FROM <table_name>;
 
 выведет что-то похожее на
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +--------------------------------+
@@ -436,7 +436,7 @@ CREATE STATISTICS stats(dependenies) ON country, language FROM client;
 После исправлений файл \texttt{pg\_hba.conf} должен выглядеть приблизительно так
 \begin{lstlisting}[
 title = {\sffamily pg\_hba.conf},
-style = cmd,
+style = bash,
 numbers = none
 ]
 ...
@@ -464,7 +464,7 @@ host    appdb           app             all                     trust
 
 Примеры создания резервной копии базы данных
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 pg_dump -U postgres -d demo --format=tar -v -f $(date +%Y-%m-%d).demo.tar
@@ -473,7 +473,7 @@ pg_dump -U postgres -d demo -f $(date +%Y-%m-%d).demo.sql
 
 Создать резервную копию с backup-сервера в каталог \directory{/backup} (каталог должен существовать)
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 pg_basebackup -x -h db01.example.com -U backup -D /backup
@@ -482,7 +482,7 @@ pg_basebackup -x -h db01.example.com -U backup -D /backup
 
 Копирование со сжатием в bzip2, для случаев, когда нужно использовать нестандартный алгоритм сжатия
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 pg_basebackup -x --format=tar -h db01.example.com -U backup -D - | bzip2 -9 > /backup/db01/backup-$(date +%Y-%m-%d).tar.bz2
@@ -490,7 +490,7 @@ pg_basebackup -x --format=tar -h db01.example.com -U backup -D - | bzip2 -9 > /b
 
 Копирование со сжатием в несколько потоков (задействуем 8 ядер)
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 pg_basebackup -x --format=tar -h db01.example.com -U backup -D - | lbzip2 -n 8 -9 > /backup/db01/backup-$(date +%Y-%m-%d).tar.bz2
@@ -498,7 +498,7 @@ pg_basebackup -x --format=tar -h db01.example.com -U backup -D - | lbzip2 -n 8 -
 
 Копирование запускается на сервере базы данных. Формируемая резервная копия отправляется на удаленный сервер по ssh
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 pg_basebackup -x --format=tar -h 127.0.0.1 -U backup -D - | \
@@ -698,7 +698,7 @@ INSERT INTO test(name) VALUES ('Ansys') RETURNING id;
 \end{lstlisting}
 выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +----+
@@ -726,7 +726,7 @@ $$;
 \end{lstlisting}
 выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 NOTICE: The primary key is: 2
@@ -883,7 +883,7 @@ GROUP BY quarter, make;
 \end{lstlisting}
 выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 quarter | make    | count
@@ -965,7 +965,7 @@ FROM aircrafts;
 \end{lstlisting}
 выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +------------------+
@@ -995,7 +995,7 @@ GROUP BY car_model_id;
 \end{lstlisting}
 выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 car_model_id | doors2 | doors3 | doors4 | doors5
@@ -1464,7 +1464,7 @@ INSERT INTO products_log (SELECT * FROM moved_rows);
 
 Синтаксис оконных функций выглядит так
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 <function_name> (<function_arguments>)
@@ -1582,7 +1582,7 @@ WINDOW w AS (PARTITION BY date_trunc('year', month)); -- определение 
 
 Выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +---------+-----+----------+------------+
@@ -1643,7 +1643,7 @@ ORDER BY month DESC;
 
 Выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +---------+-----+--------+--------+------+
@@ -1673,7 +1673,7 @@ FROM generate_series(10,15) AS t(n);
 
 Выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +----+--------+
@@ -1760,7 +1760,7 @@ ORDER BY car_id, advertisement_date;
 
 Другой пример. Пусть дана следующая таблица
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +---------------------+-----+
@@ -1794,7 +1794,7 @@ FROM monthly_data;
 
 Выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +-----+---------+
@@ -2111,7 +2111,7 @@ psql -U postgres -d postgres -c '\! chcp 1251' -f sql_query.sql
 \end{lstlisting}
 выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +---+-------------------+
@@ -2164,7 +2164,7 @@ WHEN rank IS NULL THEN RAISE EXCEPTION 'Rank should be not NULL';
 
 Самая простая команда выглядит так
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 [ <<label>> ]
@@ -2201,7 +2201,7 @@ FROM (VALUES (3),(5),(8)) AS t(n); -- источником данных выст
 \end{lstlisting}
 выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +---+------------------+
@@ -2221,7 +2221,7 @@ numbers = none
 
 Команда \texttt{WHILE} продолжает выполнять блок команд, пока истинно заданное условие. Вот ее синтаксис
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 [ <<label>> ]
@@ -2259,7 +2259,7 @@ END; $$ LANGUAGE plpgsql;
 
 Синтаксис команды \texttt{FOR} представлен ниже:
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 [ <<label>> ]
@@ -2635,7 +2635,7 @@ SELECT arr, arr[0] FROM test;
 \end{lstlisting}
 выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +---------------+-----+
@@ -2669,7 +2669,7 @@ FROM
 \end{lstlisting}
 выведет (предварительно нужно задать в \texttt{psql} \verb|\x|)
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +-[ RECORD 1 ]----------------------+------------+
@@ -2724,7 +2724,7 @@ SELECT substring('python',1,i) FROM generate_series(1,length('python')) AS g(i);
 \end{lstlisting}
 выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +-----------+
@@ -2751,7 +2751,7 @@ SELECT
 \end{lstlisting}
 выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +------------------------------+
@@ -2807,7 +2807,7 @@ SELECT color[2] FROM colors;
 \end{lstlisting}
 выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +--------+
@@ -2831,7 +2831,7 @@ FROM colors;
 \end{lstlisting}
 вернет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +----------+
@@ -2868,7 +2868,7 @@ SELECT array_remove('{Ansys,Nastran,Abaqus}'::text[], 'Ansys');
 \end{lstlisting}
 выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +------------------+
@@ -2948,7 +2948,7 @@ postgres=# SELECT 'tires=>"winter tires", seat=>leather'::hstore;
 \end{lstlisting}
 выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +--------------------------------------------+
@@ -2967,7 +2967,7 @@ SELECT hstore('CAE-package', 'Ansys');
 \end{lstlisting}
 выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +------------------------+
@@ -3047,7 +3047,7 @@ SELECT DISTINCT (each(feature)).* FROM features;
 \end{lstlisting}
 выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +-------------+------------+
@@ -3113,7 +3113,7 @@ FROM hstore_doc;
 \end{lstlisting}
 выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +-------------+--------------+
@@ -3509,7 +3509,7 @@ conn.execute('INSERT INTO test_cae(id, name) VALUES (%s, %s)',
 
 Конфигурационный файл утилиты \texttt{psql} может включать следующие настройки
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 title = {\sffamily psqlrc.conf},
 numbers = none
 ]
@@ -3668,6 +3668,15 @@ numbers = none
 psql -U postgres -c 'select version();'
 \end{lstlisting}
 
+Создать  базу данных из sql-файла с перенаправлением стандартного потока вывода и стандратного потока вывода ошибок в log-файл
+\begin{lstlisting}[
+style = bash,
+numbers = none	
+]
+psql -U postgres -f demo_small.sql &> demo.log
+# то же, но создание базы данных происходит в фоновом режиме
+psql -U postgres -f demo_small.sql &> demo.log &
+\end{lstlisting}
 
 
 \section{Специальные функции и операторы}
@@ -3743,7 +3752,7 @@ WHERE
 
 Выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +---------------+-------------------+
@@ -3784,7 +3793,7 @@ SELECT generate_series(1.1, 4, 1.3) AS real_num;
 \end{lstlisting}
 выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +----------+
@@ -3808,7 +3817,7 @@ SELECT generate_series('2020-05-01 00:00'::timestamp,
 \end{lstlisting}
 выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +---------------------+
@@ -3835,7 +3844,7 @@ FROM
 \end{lstlisting}
 выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +---+---+
@@ -3863,7 +3872,7 @@ SELECT * FROM pg_ls_dir('.') WITH ORDINALITY AS t(ls, n) LIMIT 5;
 \end{lstlisting}
 выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +------------------+---+
@@ -3894,7 +3903,7 @@ SELECT idx, number FROM
 \end{lstlisting}
 выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +---------------------+--------+
@@ -3922,7 +3931,7 @@ SELECT unnest('{2,3,4}'::int[]) AS idx, 5 AS number;
 \end{lstlisting}
 выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +-----+--------+
@@ -4171,7 +4180,7 @@ SELECT * FROM jsonb_each(
 \end{lstlisting}
 выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +--------------+-----------------------------+
@@ -4246,7 +4255,7 @@ SELECT * FROM jsonb_pretty(
 \end{lstlisting}
 выведет
 \begin{lstlisting}[
-style = cmd,
+style = bash,
 numbers = none
 ]
 +-----------------------------+
@@ -4518,7 +4527,7 @@ SELECT jsonb_path_query AS res FROM jsonb_path_query(
 \end{lstlisting}
 выведет
 \begin{lstlisting}[
-style = cmd, 
+style = bash, 
 numbers = none
 ]
 res|

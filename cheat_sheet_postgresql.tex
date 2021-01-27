@@ -3556,6 +3556,28 @@ numbers = none
 
 \noindent\verb|\!|: выполняет команду операционной системы.
 
+ЗАМЕЧАНИЕ: если после перехода на новую версию PostgreSQL и изменения номера порта (скажем, на 5433), команда
+\begin{lstlisting}[
+style = bash,
+numbers = none	
+]
+psql -U postgres
+\end{lstlisting}
+возвращает
+\begin{lstlisting}[
+numbers = none	
+]
+psql: error: could not connect to server: No such file or directory
+    Is the server running locally and accepting
+    connections on Unix domain socket "/tmp/.s.PGSQL.5432"?
+\end{lstlisting}
+то можно попробовать вариант с явным указанием порта
+\begin{lstlisting}[
+numbers = none	
+]
+psql -U postgres -h localhost -p 5433
+\end{lstlisting}
+
 
 
 \subsection{Примеры использования}

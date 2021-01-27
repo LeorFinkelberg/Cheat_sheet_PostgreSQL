@@ -3678,6 +3678,15 @@ psql -U postgres -f demo_small.sql &> demo.log
 psql -U postgres -f demo_small.sql &> demo.log &
 \end{lstlisting}
 
+Вывести список текущих настроек (пусть нас интересует номер порта)
+\begin{lstlisting}[
+style = bash,
+numbers = none	
+]
+psql -U postgres -c "show all;" | grep -inE port
+\end{lstlisting}
+
+
 
 \section{Специальные функции и операторы}
 

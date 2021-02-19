@@ -3590,6 +3590,45 @@ numbers = none
 
 \noindent\verb|\!|: выполняет команду операционной системы.
 
+ЗАМЕЧАНИЕ: если после перехода на новую версию PostgreSQL и изменения номера порта (скажем, на 5433), команда
+\begin{lstlisting}[
+style = bash,
+numbers = none	
+]
+psql -U postgres
+\end{lstlisting}
+возвращает
+\begin{lstlisting}[
+numbers = none	
+]
+psql: error: could not connect to server: No such file or directory
+    Is the server running locally and accepting
+    connections on Unix domain socket "/tmp/.s.PGSQL.5432"?
+\end{lstlisting}
+то можно попробовать вариант с явным указанием порта
+\begin{lstlisting}[
+numbers = none	
+]
+psql -U postgres -h localhost -p 5433
+\end{lstlisting}
+
+К слову, информацию о текущих процессах, связанных с Postgres можно посмотреть так
+\begin{lstlisting}[
+style = bash,
+numbers = none	
+]
+ps aux | grep -inE postgres
+\end{lstlisting}
+
+Эта команда должна вернуть что-то вроде
+\begin{lstlisting}[
+numbers = none	
+]
+14:leor.finkelberg   3426   0,1  0,0  4481224   3616   ??  Ss    3:39     0:00.11 /Applications/Postgres.app/Contents/Versions/12/bin/postgres -D /Users/leor.finkelberg/Library/Application Support/Postgres/var-12 -p 5433
+\end{lstlisting}
+
+Здесь и информация о data-директории (\verb|-D|), и информация о порту (\verb|-p|). 
+
 
 
 \subsection{Примеры использования}
@@ -3711,6 +3750,15 @@ psql -U postgres -f demo_small.sql &> demo.log
 # то же, но создание базы данных происходит в фоновом режиме
 psql -U postgres -f demo_small.sql &> demo.log &
 \end{lstlisting}
+
+Вывести список текущих настроек (пусть нас интересует номер порта)
+\begin{lstlisting}[
+style = bash,
+numbers = none	
+]
+psql -U postgres -c "show all;" | grep -inE port
+\end{lstlisting}
+
 
 
 \section{Специальные функции и операторы}

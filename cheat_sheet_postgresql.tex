@@ -3535,7 +3535,7 @@ conn.execute('INSERT INTO test_cae(id, name) VALUES (%s, %s)',
 
 \section{Приемы работы в \texttt{psql}}
 
-\texttt{psql} -- это терминальный клиент для раоботы с PostgreSQL. Утилита \texttt{psql} предоставляет ряд метакоманд и различные возможности, подобные тем, что имеются у командных оболочек, для облегчения написания скриптов и автоматизации широкого спектра задач.
+\texttt{psql} -- это терминальный клиент для работы с PostgreSQL. Утилита \texttt{psql} предоставляет ряд метакоманд и различные возможности, подобные тем, что имеются у командных оболочек, для облегчения написания скриптов и автоматизации широкого спектра задач.
 
 \subsection{Конфигурационный файл}
 
@@ -3647,6 +3647,16 @@ style = sql,
 numbers = none
 ]
 $ psql -U postgtes -d demo -c '\x' -c 'TABLE aircrafts LIMIT 5;'
+\end{lstlisting}
+
+Выполнить инструкции из файла и выйти из сессии
+\begin{lstlisting}[
+style = sql,
+numbers = none	
+]
+$ cat simple_sql_test.sql
+TABLE tickets LIMIT 5;
+$ psql -U postgres -p 5433 -d demo -f simple_sql_test.sql
 \end{lstlisting}
 
 Выполнить вычисления факториала для чисел 5, 8 и 12, результат представить в виде таблицы из пар <<\emph{число} - \emph{факториал\_от\_числа}>>, а затем результат выполнения запроса записать в csv-файл

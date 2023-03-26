@@ -20,6 +20,160 @@
 
 \tableofcontents
 
+\section{Установка PostgreSQL}
+
+\subsection{Установка на Centos 7}
+
+На ОС Centos Postgres может быть установлен с использованием репозиториев <<из коробки>>, однако доступная версия Postgres (для Centos 7 это Postgres 9.2) считается устаревшей.
+
+Прежде чем приступить к настройке нового репозитория, следует исключить из поиск пакетов \verb|postgresql| из репозитория Centos-Base. Иначе зависимости могут разрешаться для \verb|postgresql|, предоставляемого базовым репозиторием. Для этого нужно в файле \verb|/etc/yum.repos.d/CentOS-Base.repo| в разделы \verb|[base]| и \verb|[updates]| добавить строку \verb*|exclude=postgresql*|. В итоге должно получиться так
+\begin{lstlisting}[
+title = {\sffamily /etc/yum.repos.d/CentOS-Base.repo},
+style = bash,
+numbers = none	
+]
+[base]
+name=CentOS-$releasever - Base
+mirrorlist=http://mirrorlist...
+gpgcheck=1
+gpgkey=file:///...
+exclude=postgresql*  # <- NB
+
+[updates]
+name=CentOS-$releasever - Updates
+mirrorlist=...
+gpgcheck=1
+gpgkey=file:///...
+exclude=postgresql*  # <- NB
+...
+\end{lstlisting}
+
+Устанавливаем пакет конфигурации репозитория, используя официальный репозиторий PostgreSQL для CentOS
+\begin{lstlisting}[
+style = bash,
+numbers = none
+]
+$ sudo yum install https://download.postgresql.org/pub/repos/yum/reporpms/EL-7-x86_64/pgdg-redhat-repo-latest.noarch.rpm
+\end{lstlisting}
+
+Устанавливаем PostgreSQL-сервер (несколько раз нужно будет подтвердить, что мы разрешаем импотр GPG-ключей)
+\begin{lstlisting}[
+style = bash,
+numbers = none
+]
+# PostgreSQL 12
+$ sudo yum install postgresql12-server
+\end{lstlisting}
+
+Прежде чем можно будет создать свою базу данных, нужно создать кластер баз данных PostgreSQL. Кластер баз данных -- это набор баз данных, управляемых одним экземпляром сервера. Создание кластера баз данных сводится к созданию каталогов, в которые будут помещены данные БД и баз данных \verb|template1| и \verb|postgres|.
+
+База данных \verb|template1| нужна для создания новой базы данных. Все, что в ней находится будет помещено в новую базу данных при ее создании. А \verb|postgres| это база данных по умолчанию.
+
+Создать PostgreSQL-кластер базы данных можно так
+\begin{lstlisting}[
+style = bash,
+numbers = none
+]
+$ sudo /usr/pgsql-12/bin/postgresql-12-setup initdb
+Initializing database ... OK
+\end{lstlisting}
+
+Запускаем PostgreSQL с помощью утилиты \verb|systemctl|
+\begin{lstlisting}[
+style = bash,
+numbers = none	
+]
+$ sudo systemctl start postgresql-12 
+$ sudo systemctl enable postgresql-12
+\end{lstlisting}
+
+Во время установки была создана роль \verb|postgres|. Чтобы использовать ее для запуска утилиты \verb|psql| следует набрать следующее
+\begin{lstlisting}[
+style = bash,
+numbers = none
+]
+$ sudo -i -u postgres
+\end{lstlisting}
+
+Чтобы не переключаться между ролями можно сделать так
+\begin{lstlisting}[
+style = bash,
+numbers = none	
+]
+$ sudo -u postgres psql
+\end{lstlisting}
+
+На текущий момент у нас есть только роль \verb|postgres|. Чтобы создать новую роль нужно набрать в командной оболочке
+\begin{lstlisting}[
+style = bash,
+numbers = none
+]
+$ sudo -u postgres creatuser --interactive  # sammy
+\end{lstlisting}
+
+PostgreSQL предполагает, что у роли есть база данных с тем же именем. То есть если роль пользователя называется \verb|sammy|, то эта роль попытается подключиться к базе данных с тем же именем \verb|sammy|
+\begin{lstlisting}[
+style = bash,
+numbers = none
+]
+$ sudo -u postgres createdb sammy
+\end{lstlisting}
+
+Если имя роли PostgreSQL не совпадает с именем пользователя Linux, его можно добавить так
+\begin{lstlisting}[
+style = bash,
+numbers = none
+]
+$ sudo adduser sammy
+\end{lstlisting}
+а потом
+\begin{lstlisting}[
+style = bash,
+numbers = none	
+]
+$ sudo -u sammy psql
+\end{lstlisting}
+
+
+
+
+\subsection{Установка на MacOS X}
+
+Для работы с PostreSQL на ОС MacOS X проще всего установить специальный клиент \url{https://postgresapp.com/}. Нужно скачать образ приложения Postgres.app и перенести его в директорию \verb|Applications|. Затем нужно двойным кликом запустить приложение. После чего появится окно приложения (\pic{fig:postgresapp}).
+\begin{figure}[h]
+	\centering
+	\includegraphics[scale=0.5]{figures/postgresapp.png}
+	\caption{Окно приложения Postgres для MacOS X}\label{fig:postgresapp}
+\end{figure}
+
+Нажимаем кнопку \emph{Initialize} и запускаем сервер (\pic{fig:postgresapp_run_server}). Убедиться в том, что сервер запущен можно с помощью утилиты \verb|pg_ctl|
+\begin{lstlisting}[
+style = bash,
+numbers = none
+]
+$ pg_ctl -D ~/Library/Application\ Support/Postgres/var-15 status
+pg_ctl: server is running (PID: 48717)
+/Applications/Postgres.app/Contents/Versions/15/bin/postgres "-D" "/Users/leor.finkelberg/Library/Application Support/Postgres/var-15" "-p" "5432" 
+\end{lstlisting}
+
+И так
+\begin{lstlisting}[
+style = bash,
+numbers = none
+]
+$ ps aux | grep -inE postgres
+...
+581:leor.finkelberg  48717   0,0  0,2 34344392  15460   ??  Ss    1:42     0:00.08 /Applications/Postgres.app/Contents/Versions/15/bin/postgres -D /Users/leor.finkelberg/Library/Application Support/Postgres/var-15 -p 5432
+...
+\end{lstlisting}
+
+\begin{figure}[h]
+	\centering
+	\includegraphics[scale=0.5]{figures/postgresapp_run_server.png}
+	\caption{Запуск серверва PostgreSQL на MacOS X}\label{fig:postgresapp_run_server}
+\end{figure}
+
+
 \section{Замечания по использованию различных баз данных для различных проектов}
 
 Небольшому стартапу лучше выбрать одну из реляционных баз данных, например, MySQL или PostgreSQL -- они подходят для широкого круга задач. Быстрорастущим компаниям есть смысл использовать сразу две-три СУБД. Например, MySQL или PostgreSQL для длительного хранения данных, а Redis -- для быстрой обработки запросов.

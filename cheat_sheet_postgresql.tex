@@ -134,6 +134,34 @@ numbers = none
 $ sudo -u sammy psql
 \end{lstlisting}
 
+Если при создании базы данных из sql-файла возникают ошибки доступа к данным, то для начала нужно проверить права роли, из-под которой создается база данных
+\begin{lstlisting}[
+numbers = none
+]
+# Запускаем psql из-под роли, у которой есть права на изменение ролей
+$ sudo -u postgres psql
+postgres# \du  -- выведет список ролей
+\end{lstlisting}
+
+Если окажется, что интересующая роль не обладает нужными правами, то следует их добавить
+\begin{lstlisting}[
+numbers = none	
+]
+# alter user role_name superuser;
+# alter user role_name createrole;
+# alter user role_name createdb;
+\end{lstlisting}
+
+После этого можно запускать создание базы данных из sql-файла
+\begin{lstlisting}[
+style = bash,
+numbers = none	
+]
+# Если файл большой можно запустить создание в фоне (& в конце команды)
+$ psql -f database_maker.sql > psql.log 2>&1 &
+# Следим за ходом выполнения
+$ tail -f psql.log
+\end{lstlisting}
 
 
 
@@ -172,6 +200,7 @@ $ ps aux | grep -inE postgres
 	\includegraphics[scale=0.5]{figures/postgresapp_run_server.png}
 	\caption{Запуск серверва PostgreSQL на MacOS X}\label{fig:postgresapp_run_server}
 \end{figure}
+
 
 
 \section{Замечания по использованию различных баз данных для различных проектов}

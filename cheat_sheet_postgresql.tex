@@ -201,7 +201,49 @@ $ ps aux | grep -inE postgres
 	\caption{Запуск серверва PostgreSQL на MacOS X}\label{fig:postgresapp_run_server}
 \end{figure}
 
+\section{Учебные набора данных}
 
+Очень приличных объемов базу данных можно скачать здесь \url{https://drive.google.com/drive/folders/13F7M80Kf_somnjb-mTYAnh1hW1Y_g4kJ}
+
+Например можно скачать sql-файл создания базы данных
+\begin{lstlisting}[
+style = bash,
+numbers = none
+]
+$ unzip postgres_air.sql.zip
+# запускаем в фоне
+$ psql -f postgres_air.sql > psql.log 2>&1 &
+# следим за ходом выполнения 
+$ tail -f psql.log
+\end{lstlisting}
+
+Если создание базы данных прошло успешно, то потом нужно добавить путь к схеме базы данных
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SET search_path TO postgres_air;
+\end{lstlisting}
+
+Проверить, что все таблицы схемы видны можно сделать так
+\begin{lstlisting}[
+numbers = none
+]
+# \dt+
+\end{lstlisting}
+
+При работе с этой базой данных полезно сразу создать кое-какие индексы
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+CREATE INDEX flight_departure_airport ON flight(departure_airport);
+CREATE INDEX flight_scheduled_departure ON flight(scheduled_departure);
+CREATE INDEX flight_update_ts ON flight(update_ts);
+CREATE INDEX booking_leg_booking_id ON booking_leg(booking_id);
+CREATE INDEX booking_leg_update_ts ON booking_leg(update_ts);
+CREATE INDEX account_last_name ON account(last_name);
+\end{lstlisting}
 
 \section{Замечания по использованию различных баз данных для различных проектов}
 
@@ -3731,7 +3773,7 @@ title = {\sffamily psqlrc.conf},
 numbers = none
 ]
 \set QUIET 1
-\timing
+\timing on
 \pset border 2
 \pset null <NULL>
 \set ON_ERROR_STOP on

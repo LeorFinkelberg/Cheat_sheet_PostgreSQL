@@ -349,7 +349,7 @@ style = sql,
 numbers = none
 ]
 SELECT
-  f.flight_id, -- атрибут группировки
+  f.flight_no, -- атрибут группировки
   f.actual_departure,  -- атрибут группировки
   count(passenger_id) passengers
 FROM
@@ -360,7 +360,7 @@ WHERE
   f.departure_airport = 'JFK'
   AND f.arrival_airport = 'ORD'
   AND f.actual_departure BETWEEN '2020-08-14' AND '2020-08-15'
-GROUP BY f.flight_id, f.actual_departure; -- атрибуты группировки должна быть в списке выборки
+GROUP BY f.flight_no, f.actual_departure; -- атрибуты группировки должна быть в списке выборки
 \end{lstlisting}
 
 Чтобы получить план выполнения запроса, используется команда \verb|EXPLAIN query|.

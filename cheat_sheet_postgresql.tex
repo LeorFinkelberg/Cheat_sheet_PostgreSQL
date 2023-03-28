@@ -341,6 +341,49 @@ CREATE INDEX account_last_name ON account(last_name);
 
 Алгоритм сортировки слиянием особенно эффективен, если одна или обе входные таблицы уже отсортированы.
 
+\section{Чтение планов выполнения}
+
+Рассмотрим запрос
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT
+  f.flight_id, -- атрибут группировки
+  f.actual_departure,  -- атрибут группировки
+  count(passenger_id) passengers
+FROM
+  flight f
+    JOIN booking_leg bl ON bl.flight_id = f.flight_id
+    JOIN passenger p ON p.booking_id = bl.booking_id
+WHERE
+  f.departure_airport = 'JFK'
+  AND f.arrival_airport = 'ORD'
+  AND f.actual_departure BETWEEN '2020-08-14' AND '2020-08-15'
+GROUP BY f.flight_id, f.actual_departure; -- атрибуты группировки должна быть в списке выборки
+\end{lstlisting}
+
+Чтобы получить план выполнения запроса, используется команда \verb|EXPLAIN query|.
+
+План содержит:
+\begin{itemize}
+	\item оценки стоимости,
+	
+	\item ожиадемое количество выходных строк,
+	
+	\item ожидаемый средний размер (<<ширину>>) строк.
+\end{itemize}
+
+Значения стоимости включают в себя совокупную стоимость:
+\begin{itemize}
+	\item первая показывает стоимость, необходимую для создания первой строки вывода,
+	
+	\item  в то время как вторая оценивает \emph{полную стоимость получения всего результата}.
+\end{itemize}
+
+Важно подчеркнуть, что все эти цифры являются приблизительными. План выполнения представляется в виде дерева физических операций. В этом дереве узлы представляют операции, а стрелки указывают на операнды.
+
+
 
 
 \section{Замечания по использованию различных баз данных для различных проектов}

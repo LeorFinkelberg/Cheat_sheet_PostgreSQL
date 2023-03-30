@@ -665,7 +665,121 @@ CREATE UNIQUE INDEX account_freq_flyer ON account(frequent_flyer_id);
 На \emph{маленьких} таблицах \emph{индексы не эффективны}!  \cite[\strbook{73}]{dombrovskaya:postgresql-2022} То есть на маленьких таблицах коэффициент селективности не будет на столько низким, чтобы индексы были эффективны
 }
 
+B-деревья поддерживают поиск по отношениям \verb|=|, \verb|<|, \verb|>| и \verb|BETWEEN|. 
 
+B-деревья по преобразованному атрибуту использовать нельзя. Пусть имеется индекс
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+CREATE INDEX account_last_name ON account (last_name);
+\end{lstlisting}
+
+Следующий запрос не сможет воспользоваться этим индексом!
+\begin{lstlisting}[
+style = sql,
+numbers = none	
+]
+SELECT * FROM account WHERE lower(last_name) = 'daniels';
+\end{lstlisting}
+
+Чтобы решить проблему нужно создать \emph{функциональный} индекс
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+CREATE INDEX account_last_name_lower ON account(lower(last_name));
+\end{lstlisting}
+
+Приведение типа тоже рассматривается как преобразование атрибута. Например, даже если на атрибуте есть индекс, то приведение типа запрещает использование индекса.
+
+\remark{
+Индексы не используются для преобразованных атрибутов. Нужно создавать функциональные индексы
+}
+
+Один из частых случаев -- поиск изменений, внесенных в таблицу за сегодняшний день. В девяноста пяти процентах случаев это условие формулируется как \verb|update_ts::date = CURRENT_DATE|, фактически лишаясь индекса по столбцу \verb|update_ts|. Чтобы воспользоваться индексом, критерий следует записать как 
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+update_ts >= CURRENT_DATE
+\end{lstlisting}
+
+Рассмотрим еще один пример, когда преобразование столбца часто остается незаметным.
+
+Функция \verb|coalesce| в PostgreSQL позволяет нам использовать другое значение, когда первый аргумент неопределен. Таким образом, \verb|coalesce(actual_departure, scheduled_departure)| вернет \verb|actual_departure|, если это значение отлично от \verb|NULL|, и \verb|scheduled_departure| в противном случае
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT * FROM flight
+WHER coalesce(actual_departure, scheduled_departure)
+  BETWEEN '2020-08-17' AND '2020-08-18';
+\end{lstlisting}
+
+Однако, в данном случае индексы для этих атрибутов использоваться не будут, потому что функция \verb|coalesce| изменяет значение атрибута.
+
+Можно создать функциональный индекс, а можно переписать запрос
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT * FROM flight
+WHERE coalesce(actual_departure, scheduled_departure)
+  OR (actual_depature IS NULL
+    AND scheduled_departure BETWEEN '2020-08-17' AND '2020-08-18');
+\end{lstlisting}
+
+Postgres может использовать результаты поиска по нескольким индексам, создавая в оперативной памяти битовую карту блоков с подходящими записями, а затем применяя к ним операторы <<или>> либо <<и>>. В результате остаются только блоки, удовлетворяющие всем критериям поиска. 
+
+Использование операторов <<и>> и <<или>> для нескольких битовых карт -- очень эффективный механизм применения нескольких фильтров, но не единственный.
+
+Можно создать составной индекс по всем трем столбцам
+\begin{lstlisting}[
+style = sql,
+numbers = none	
+]
+CREATE INDEX flight_departure_arr_sched_dep
+  ON flight (
+    departure_airport,
+    arrival_airport,
+    scheduled_departure
+  );
+\end{lstlisting}
+
+Новый составной индекс будет поддерживать поиск по:
+\begin{itemize}
+	\item \verb|depature_airport|,
+	
+	\item \verb|departure_airport|, \verb|arrival_airport|,
+	
+	\item \verb|departure_airport|, \verb|arrival_airport|, \verb|scheduled_departure|.
+\end{itemize}
+
+Однако он не поддеживает поиск по:
+\begin{itemize}
+	\item \verb|arrival_airport|,
+	
+	\item \verb|arrival_airport|, \verb|scheduled_departure|.
+\end{itemize}
+
+То есть
+\begin{lstlisting}[
+style = bash,
+numbers = none
+]
+X Y Z
+======
+X     +
+X Y   +
+X Y Z +
+======
+. Y   -
+. Y Z -
+. . Z -
+\end{lstlisting}
+
+Таким образом, при создании составного индекса недостаточно решить, какие столбцы в него включить; необходимо также \emph{учитывать их порядок} \cite[\strbook{82}]{dombrovskaya:postgresql-2022}.
 
 
 

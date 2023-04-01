@@ -926,11 +926,12 @@ coalesce(t1.attr2, '0') = coalesce(t2.attr2, '0')
 	\item \emph{Строки} из первой таблицы \emph{не дублируются}, если во второй таблице для них есть несколько соответствий.
 \end{itemize}
 
-Пример полусоединения
+Пример полусоединения с ключевым словом \verb|EXISTS|
 \begin{lstlisting}[
 style = sql,
 numbers = none	
 ]
+-- только эта версия гарантирует наличия SEMI JOIN
 SELECT * FROM flight f
 WHERE 
   EXISTS (
@@ -940,10 +941,64 @@ WHERE
   );
 \end{lstlisting}
 
+Пример полусоединения с ключевым словом \verb|IN|
+\begin{lstlisting}[
+style = sql,
+numbers = none	
+]
+-- соединение вложенными циклами
+-- для каджой строки внешнего цикла (flight) нужно найти
+-- одну строку (в общем случае все строки) внутреннего цикла booking_leg
+SELECT * FROM flight WHERE flight_id IN (
+  SELECT flight_id FROM booking_leg
+);
+\end{lstlisting}
+
 В плане выполнения должно появится \verb|SEMI JOIN|.
 
+Поскольку \emph{полусоединение} может \emph{значительно уменьшить размер} набора результатов и, по определению, \emph{\color{blue}никогда не увеличивает его}, оно часто является \emph{наиболее ограничительным} соединением в запросе, и как указывалось ранее, именно наиболее ограничительное соединение должно выполняться в первую очередь \cite[\strbook{108}]{dombrovskaya:postgresql-2022}.
 
+Если запрос использует полусоединение, а в плане выполнения запроса указывается \verb|JOIN|, а не \verb|SEMI JOIN|, то дело вероятнее всего в том, что в ходе выполнения не пришлось удалять дубликаты.
 
+\subsection{Антисоединение}
+
+Антисоединение -- это анти полусоединение.
+
+Пример использования антисоединения с помощью \verb|NOT EXISTS|
+\begin{lstlisting}[
+style = sql,
+numbers = none	
+]
+-- только эта версия гарантирует наличия ANTI JOIN
+SELECT * FROM flight f WHERE NOT EXISTS (
+  SELECT flight_id FROM booking_leg WHERE flight_id = f.flight_id
+);
+\end{lstlisting}
+
+Использование антисоединения с помощью \verb|NOT IN|
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT * FROM flight WHERE flight_id NOT IN (
+  SELECT flight_id FROM booking_leg
+);
+\end{lstlisting}
+
+Не существует общих указаний общих указаний относительно того, какой синтаксис для антисоединения лучше. Разработчикам следует опробовать оба способа, чтобы увидеть, какой из них будет работать лучше в их случае.
+
+Антисоединения не может создавать дубликаты, а это значит, что можно использовать \verb|OUTER JOIN| с последующим отбором неопределенных значений
+\begin{lstlisting}[
+style = sql,
+numbers = none	
+]
+SELECT f.flight_id
+FROM flight f
+  LEFT OUTER JOIN booking_leg bl USING (flight_id)
+  WHERE bl.flight_id IS NULL;
+\end{lstlisting}
+
+Оптимизатор распознает эту конструкцию и переписывает ее на антисоединение.
 
 
 

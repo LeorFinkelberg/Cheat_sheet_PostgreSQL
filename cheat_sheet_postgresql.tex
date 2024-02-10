@@ -6794,7 +6794,146 @@ VACUUM (VERBOSE, ANALYZE) onek;
 
 TimescaleDB \url{https://www.timescale.com/} -- расширение PostgreSQL предназначенное для работы с временными рядами. Временные ряды можно хранить и PostgreSQL и просто так, но TimescaleDB обеспечивает большую производительность на том же железе. Кроме того TimescaleDB предлагает набор фичей адаптированных для эффективной работы с временными рядами.
 
-С TimescaleDB поддерживает множество языков программирования, в частности Python \url{https://docs.timescale.com/quick-start/latest/python/}, с которым можно работать через библиотеку \verb|psycopg2|
+Главная фича TimescaleDB -- это гипертаблицы. Создание гипертаблицы выглядит как создание обычной таблицы, за которым следует вызов функции \verb|create_hypertable|.
+
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+CREATE TABLE conditions(
+	tstamp timestamptz NOT NULL,
+	device VARCHAR(32) NOT NULL,
+	temperature FLOAT NOT NULL);
+
+SELECT create_hypertable(
+	'conditions', 'tstamp',
+	chunk_time_interval => INTERVAL '1 day'
+);
+
+-- альтернативный вариант, с partitioning_column:
+SELECT create_hypertable(
+	'conditions', 'tstamp',
+	partitioning_column => 'device',
+	number_partitions => 8,
+	chunk_time_interval => INTERVAL '1 day');
+\end{lstlisting}
+
+Гипертаблица -- таблица, партицированная по заданному столбцу (в данному случае по \verb|tstamp|). То есть, физически таблица будет представлять собой $N$ таблиц, в каждой из которых хранятся данные за определенный интервал времени (в данном случае это один день). Если данных много, их можно дополнительно партицировать по хешу от заданного столбца (см. столбец \verb|device|). Во втором примере от значений в столбце \verb|device| берется хеш, от которого берется остаток от деления на 8. Результат вместе с \verb|tstamp| определяет партицию (chunk в терминологии TimescaleDB), куда попадут данные.
+
+NB: Столбец \verb|tstamp| может быть не только \verb|timestamptz|, но и датой или произвольным целочисленным типом. В частности, он может быть монотонно возрастающим уникальным \verb|id|.
+
+Партицирование имеет следующие плюсы. Во-первых, каждая партиция имеет собственный индекс(ы). Индекс меньше, чем был бы индекс на одну большую таблицу. Природа временных рядов такова, что данные не удаляются и не изменяются, только дописываются в конец таблицы. За счет этого наиболее свежая партиция хранит «горячие» данные. К ним чаще всего обращаются и только они могут обновляться. Обновлять маленький индекс, который, возможно, даже целиком влезает в память, намного дешевле, чем индекс на одну большую таблицу. Во-вторых, когда мы хотим удалить старые данные, мы просто удаляем старые партиции. Это намного более дешевая операция (по сути, удаление файла), чем удалять отдельные строки в большой таблице. Кроме того, мы сразу избавляемся от проблем с \verb|VACUUM|, присущих PostgreSQL.
+
+Работа с гипертаблицей выполняется так же, как и с любой другой таблицей. Например
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+INSERT INTO conditions
+	SELECT
+		tstamp, 'device-' || (random() * 30)::INT AS device, random() * 80 - 40 AS rnd
+	FROM
+		generate_series(
+			NOW() - INTERVAL '90 days',
+			NOW(),
+			'1 min'
+		) AS tstamp;
+\end{lstlisting}
+
+Посмотреть на какие партиции нарезана гипертаблица можно так
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT show_chunks('conditions');
+\end{lstlisting}
+
+Пример на чтение
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT * FROM conditions WHERE tstamp > now() - INTERVAL '30 minutes';
+\end{lstlisting}
+
+При помощи \verb|EXPLAIN| можно убедиться, что данный запрос обращается только к одной из партиций.
+
+Помимо \verb|INSERT| и \verb|SELECT| также работают любые другие запросы -- \verb|UPDATE|, \verb|DELETE|, \verb|ALTER TABLE|, все что угодно. Вы можете использовать произвольные типы, индексы и расширения для PostgreSQL. Например, вы можете положить рядом с временными рядами какие-то геоданные, а затем проиндексировать их при помощи PostGIS.
+
+NB: Основная сложность с гипертаблицами -- это правильно определить \emph{размер партиции}. Рекомендуется выбирать его так, чтобы суммарный размер всех <<горячих>> партиций составлял не более 25\% от доступной оперативной памяти.
+
+<<Холодные>> партиции не обновляются. По мере старения данных обращение к ним происходит все реже. TimescaleDB умеет переводить такие данные из строкового представления в колоночное, что в свою очередь позволяет произвести эффективное сжатие:
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+ALTER TABLE conditions SET (
+	timescaledb.compress,
+	timescaledb.compress_segmentby = 'device'
+);
+
+SELECT add_compression_policy(
+	'conditions',
+	compress_after => INTERVAL '1 day');
+\end{lstlisting}
+
+Здесь мы говорим сжимать партиции, которые старше суток. Сегментирование данных при переводе в колоночное представление осуществляется по столбцу \verb|device|.
+
+Проверить, насколько хорошо жмутся данные, можно таким запросом:
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT * FROM chunk_compression_stats('conditions');
+\end{lstlisting}
+
+Непрерывные агрегаты (continuous aggregates) похожи на \verb|MATERIALIZED VIEW| в PostgreSQL. Только они сами знают, когда себя обновлять, и обновление происходит на основе только тех данных, которые изменились. Раньше мы делали нечто подобное на триггерах. Идея непрерывных агрегатов такая же, только реализация удобнее.
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+-- Создание непрерывного агрегата
+CREATE MATERIALIZED VIEW conditions_summary_hourly
+WITH (timescaledb.continuous) AS
+SELECT device,
+	time_bucket(INTERVAL '1 hour', tstamp) AS bucket,
+	AVG(temperature),
+	MAX(temperature),
+	MIN(temperature)
+FROM conditions
+GROUP BY device, bucket;
+
+SELECT add_continuous_aggregate_policy('conditions_summary_hourly',
+	start_offset => INTERVAL '3 hours',
+	end_offset => INTERVAL '1 hour',
+	schedule_interval => INTERVAL '1 hour');
+\end{lstlisting}
+
+По первой части все понятно — мы считаем среднюю, максимальную и минимальную температуру за часовые интервалы. Во второй части мы говорим, как часто необходимо обновлять агрегат. В данном случае он будет обновляться каждый час, используя информацию за последние три часа не считая последнего часа. Для корректной работы агрегатов общий размер временного окна (в данном случае, два часа) должен быть по крайней мере в два раза больше \verb|bucket| (в данном случае, один час).
+
+Пример запроса к агрегату:
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT bucket, avg
+	FROM conditions_summary_hourly
+	WHERE device = 'device-1' AND bucket >= now() - INTERVAL '5 hours'
+	ORDER BY bucket;
+\end{lstlisting}
+
+Интересная особенность агрегатов заключается в том, что при чтении из них подмешиваются и «горячие» данные. В этом можно убедиться либо при помощи \verb|EXPLAIN|, либо дописав в \verb|conditions| новых данных и повторив предыдущий запрос. Таким образом, наш \verb|VIEW| всегда актуален.
+
+
+
+
+
+
+
+
+
+
+TimescaleDB поддерживает множество языков программирования, в частности Python \url{https://docs.timescale.com/quick-start/latest/python/}, с которым можно работать через библиотеку \verb|psycopg2|
 \begin{lstlisting}[
 style = ironpython,
 numbers = none
@@ -6909,7 +7048,11 @@ cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
 \subsubsection{На Linux}
 
+Если PostgreSQL уже установлен и требуется сохранить текущую версию, то во избежание ошибок, TimescaleDB следует собирать из исходников. В противном случае можно использовать инструкции на странице \url{https://docs.timescale.com/self-hosted/latest/install/installation-linux/}
+
 \subsubsection{На MacOS}
+
+Если PostgreSQL уже установлен и требуется сохранить текущую версию, то во избежание ошибок, TimescaleDB следует собирать из исходников. В противном случае можно использовать инструкции на странице \url{https://docs.timescale.com/self-hosted/latest/install/installation-macos/}
 
 \subsubsection{Сборка из исходников}
 

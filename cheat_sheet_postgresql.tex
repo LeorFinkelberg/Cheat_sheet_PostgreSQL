@@ -6790,6 +6790,134 @@ numbers = none
 VACUUM (VERBOSE, ANALYZE) onek;
 \end{lstlisting}
 
+\section{Обработка временных рядов в TimescaleDB}
+
+TimescaleDB \url{https://www.timescale.com/} -- расширение PostgreSQL предназначенное для работы с временными рядами. Временные ряды можно хранить и PostgreSQL и просто так, но TimescaleDB обеспечивает большую производительность на том же железе. Кроме того TimescaleDB предлагает набор фичей адаптированных для эффективной работы с временными рядами.
+
+С TimescaleDB поддерживает множество языков программирования, в частности Python \url{https://docs.timescale.com/quick-start/latest/python/}, с которым можно работать через библиотеку \verb|psycopg2|
+\begin{lstlisting}[
+style = ironpython,
+numbers = none
+]
+import psycopg2
+
+CONNECTION = "postgres://username:password@host:port/dbname"
+# CONNECTION = "postgres://username:password@host:port/dbname?sslmode=require"
+# или так
+# CONNECTION = "dbname=tsdb user=tsdbadmin password=secret host=host.com port=5432 sslmode=require"
+\end{lstlisting}
+
+Создать объект соединения и объект курсора можно так
+\begin{lstlisting}[
+style = ironpython,
+numbers = none
+]
+CONNECTION = "postgres://username:password@host:port/dbname"
+with psycopg2.connect(CONNECTION) as conn:
+	cursor = conn.cursor()
+	# use the cursor to interact with your database
+	# cursor.execute("SELECT * FROM table")
+\end{lstlisting}
+
+Создать таблицу можно так
+\begin{lstlisting}[
+style = ironpython,
+numbers = none
+]
+query_create_sensors_table = """CREATE TABLE sensors (
+	id SERIAL PRIMARY KEY,
+	type VARCHAR(50),
+	location VARCHAR(50)
+	);
+"""
+\end{lstlisting}
+
+Выполняем запрос, сохраняем изменения (commit), закрываем объект курсора
+\begin{lstlisting}[
+style = ironpython,
+numbers = none
+]
+cursor = conn.cursor()
+# see definition in Step 1
+cursor.execute(query_create_sensors_table)
+conn.commit()
+cursor.close()
+\end{lstlisting}
+
+Теперь можно создать \emph{гипертаблицу}
+\begin{lstlisting}[
+style = ironpython,
+numbers = none
+]
+# create sensor data hypertable
+query_create_sensordata_table = """CREATE TABLE sensor_data (
+	time TIMESTAMPTZ NOT NULL,
+	sensor_id INTEGER,
+	temperature DOUBLE PRECISION,
+	cpu DOUBLE PRECISION,
+	FOREIGN KEY (sensor_id) REFERENCES sensors (id)
+	);
+	"""
+
+# требуется указать имя таблицы, которую нужно преобразовать в гипертаблицу и имя столбца с временной меткой	
+query_create_sensordata_hypertable = "SELECT create_hypertable('sensor_data', by_range('time'));"
+
+cursor = conn.cursor()
+cursor.execute(query_create_sensordata_table)
+cursor.execute(query_create_sensordata_hypertable)
+# commit changes to the database to make changes persistent
+conn.commit()
+cursor.close()
+\end{lstlisting}
+
+Вставка данных
+\begin{lstlisting}[
+style = ironpython,
+numbers = none
+]
+sensors = [('a', 'floor'), ('a', 'ceiling'), ('b', 'floor'), ('b', 'ceiling')]
+cursor = conn.cursor()
+for sensor in sensors:
+	try:
+		cursor.execute(
+		    "INSERT INTO sensors (type, location) VALUES (%s, %s);",
+		    (sensor[0], sensor[1])
+		)
+	except (Exception, psycopg2.Error) as error:
+		print(error.pgerror)
+conn.commit()
+
+cursor = conn.cursor()
+query = "SELECT * FROM sensor_data;"
+cursor.execute(query)
+for row in cursor.fetchall():
+	print(row)
+cursor.close()
+\end{lstlisting}
+
+Если требуется получить список словарей, то можно сделать так
+\begin{lstlisting}[
+style = ironpython,
+numbers = none
+]
+cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+\end{lstlisting}
+
+\subsection{Установка TimescaleDB}
+
+Инструкции по установке TimescaleDB можно найти на странице \url{https://docs.timescale.com/self-hosted/latest/install/} (раздел <<Other deployment options>>)
+
+\subsubsection{На Linux}
+
+\subsubsection{На MacOS}
+
+\subsubsection{Сборка из исходников}
+
+
+\url{https://eax.me/timescaledb/}
+
+
+
 
 
 % Источники в "Газовой промышленности" нумеруются по мере упоминания 

@@ -6790,6 +6790,16 @@ numbers = none
 VACUUM (VERBOSE, ANALYZE) onek;
 \end{lstlisting}
 
+\subsection{Команда \texttt{COPY}}
+
+Чтобы загрузить данные по URL прямо в таблицу, можно сделать так
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+COPY sample_table FROM PROGRAM 'curl "https://www.example.com/file.csv"
+\end{lstlisting}
+
 \section{Обработка временных рядов в TimescaleDB}
 
 TimescaleDB \url{https://www.timescale.com/} -- расширение PostgreSQL предназначенное для работы с временными рядами. Временные ряды можно хранить и PostgreSQL и просто так, но TimescaleDB обеспечивает большую производительность на том же железе. Кроме того TimescaleDB предлагает набор фичей адаптированных для эффективной работы с временными рядами.

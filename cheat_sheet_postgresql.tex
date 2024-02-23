@@ -6868,6 +6868,287 @@ numbers = none
 VACUUM (VERBOSE, ANALYZE) onek;
 \end{lstlisting}
 
+\subsection{Команда \texttt{COPY}}
+
+Чтобы загрузить данные по URL прямо в таблицу, можно сделать так
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+COPY sample_table FROM PROGRAM 'curl "https://www.example.com/file.csv"
+\end{lstlisting}
+
+\section{Обработка временных рядов в TimescaleDB}
+
+TimescaleDB \url{https://www.timescale.com/} -- расширение PostgreSQL предназначенное для работы с временными рядами. Временные ряды можно хранить и PostgreSQL и просто так, но TimescaleDB обеспечивает большую производительность на том же железе. Кроме того TimescaleDB предлагает набор фичей адаптированных для эффективной работы с временными рядами.
+
+Главная фича TimescaleDB -- это гипертаблицы. Создание гипертаблицы выглядит как создание обычной таблицы, за которым следует вызов функции \verb|create_hypertable|.
+
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+CREATE TABLE conditions(
+	tstamp timestamptz NOT NULL,
+	device VARCHAR(32) NOT NULL,
+	temperature FLOAT NOT NULL);
+
+SELECT create_hypertable(
+	'conditions', 'tstamp',
+	chunk_time_interval => INTERVAL '1 day'
+);
+
+-- альтернативный вариант, с partitioning_column:
+SELECT create_hypertable(
+	'conditions', 'tstamp',
+	partitioning_column => 'device',
+	number_partitions => 8,
+	chunk_time_interval => INTERVAL '1 day');
+\end{lstlisting}
+
+Гипертаблица -- таблица, партицированная по заданному столбцу (в данному случае по \verb|tstamp|). То есть, физически таблица будет представлять собой $N$ таблиц, в каждой из которых хранятся данные за определенный интервал времени (в данном случае это один день). Если данных много, их можно дополнительно партицировать по хешу от заданного столбца (см. столбец \verb|device|). Во втором примере от значений в столбце \verb|device| берется хеш, от которого берется остаток от деления на 8. Результат вместе с \verb|tstamp| определяет партицию (chunk в терминологии TimescaleDB), куда попадут данные.
+
+NB: Столбец \verb|tstamp| может быть не только \verb|timestamptz|, но и датой или произвольным целочисленным типом. В частности, он может быть монотонно возрастающим уникальным \verb|id|.
+
+Партицирование имеет следующие плюсы. Во-первых, каждая партиция имеет собственный индекс(ы). Индекс меньше, чем был бы индекс на одну большую таблицу. Природа временных рядов такова, что данные не удаляются и не изменяются, только дописываются в конец таблицы. За счет этого наиболее свежая партиция хранит «горячие» данные. К ним чаще всего обращаются и только они могут обновляться. Обновлять маленький индекс, который, возможно, даже целиком влезает в память, намного дешевле, чем индекс на одну большую таблицу. Во-вторых, когда мы хотим удалить старые данные, мы просто удаляем старые партиции. Это намного более дешевая операция (по сути, удаление файла), чем удалять отдельные строки в большой таблице. Кроме того, мы сразу избавляемся от проблем с \verb|VACUUM|, присущих PostgreSQL.
+
+Работа с гипертаблицей выполняется так же, как и с любой другой таблицей. Например
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+INSERT INTO conditions
+	SELECT
+		tstamp, 'device-' || (random() * 30)::INT AS device, random() * 80 - 40 AS rnd
+	FROM
+		generate_series(
+			NOW() - INTERVAL '90 days',
+			NOW(),
+			'1 min'
+		) AS tstamp;
+\end{lstlisting}
+
+Посмотреть на какие партиции нарезана гипертаблица можно так
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT show_chunks('conditions');
+\end{lstlisting}
+
+Пример на чтение
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT * FROM conditions WHERE tstamp > now() - INTERVAL '30 minutes';
+\end{lstlisting}
+
+При помощи \verb|EXPLAIN| можно убедиться, что данный запрос обращается только к одной из партиций.
+
+Помимо \verb|INSERT| и \verb|SELECT| также работают любые другие запросы -- \verb|UPDATE|, \verb|DELETE|, \verb|ALTER TABLE|, все что угодно. Вы можете использовать произвольные типы, индексы и расширения для PostgreSQL. Например, вы можете положить рядом с временными рядами какие-то геоданные, а затем проиндексировать их при помощи PostGIS.
+
+NB: Основная сложность с гипертаблицами -- это правильно определить \emph{размер партиции}. Рекомендуется выбирать его так, чтобы суммарный размер всех <<горячих>> партиций составлял не более 25\% от доступной оперативной памяти.
+
+<<Холодные>> партиции не обновляются. По мере старения данных обращение к ним происходит все реже. TimescaleDB умеет переводить такие данные из строкового представления в колоночное, что в свою очередь позволяет произвести эффективное сжатие:
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+ALTER TABLE conditions SET (
+	timescaledb.compress,
+	timescaledb.compress_segmentby = 'device'
+);
+
+SELECT add_compression_policy(
+	'conditions',
+	compress_after => INTERVAL '1 day');
+\end{lstlisting}
+
+Здесь мы говорим сжимать партиции, которые старше суток. Сегментирование данных при переводе в колоночное представление осуществляется по столбцу \verb|device|.
+
+Проверить, насколько хорошо жмутся данные, можно таким запросом:
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT * FROM chunk_compression_stats('conditions');
+\end{lstlisting}
+
+Непрерывные агрегаты (continuous aggregates) похожи на \verb|MATERIALIZED VIEW| в PostgreSQL. Только они сами знают, когда себя обновлять, и обновление происходит на основе только тех данных, которые изменились. Раньше мы делали нечто подобное на триггерах. Идея непрерывных агрегатов такая же, только реализация удобнее.
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+-- Создание непрерывного агрегата
+CREATE MATERIALIZED VIEW conditions_summary_hourly
+WITH (timescaledb.continuous) AS
+SELECT device,
+	time_bucket(INTERVAL '1 hour', tstamp) AS bucket,
+	AVG(temperature),
+	MAX(temperature),
+	MIN(temperature)
+FROM conditions
+GROUP BY device, bucket;
+
+SELECT add_continuous_aggregate_policy('conditions_summary_hourly',
+	start_offset => INTERVAL '3 hours',
+	end_offset => INTERVAL '1 hour',
+	schedule_interval => INTERVAL '1 hour');
+\end{lstlisting}
+
+По первой части все понятно — мы считаем среднюю, максимальную и минимальную температуру за часовые интервалы. Во второй части мы говорим, как часто необходимо обновлять агрегат. В данном случае он будет обновляться каждый час, используя информацию за последние три часа не считая последнего часа. Для корректной работы агрегатов общий размер временного окна (в данном случае, два часа) должен быть по крайней мере в два раза больше \verb|bucket| (в данном случае, один час).
+
+Пример запроса к агрегату:
+\begin{lstlisting}[
+style = sql,
+numbers = none
+]
+SELECT bucket, avg
+	FROM conditions_summary_hourly
+	WHERE device = 'device-1' AND bucket >= now() - INTERVAL '5 hours'
+	ORDER BY bucket;
+\end{lstlisting}
+
+Интересная особенность агрегатов заключается в том, что при чтении из них подмешиваются и «горячие» данные. В этом можно убедиться либо при помощи \verb|EXPLAIN|, либо дописав в \verb|conditions| новых данных и повторив предыдущий запрос. Таким образом, наш \verb|VIEW| всегда актуален.
+
+
+
+
+
+
+
+
+
+
+TimescaleDB поддерживает множество языков программирования, в частности Python \url{https://docs.timescale.com/quick-start/latest/python/}, с которым можно работать через библиотеку \verb|psycopg2|
+\begin{lstlisting}[
+style = ironpython,
+numbers = none
+]
+import psycopg2
+
+CONNECTION = "postgres://username:password@host:port/dbname"
+# CONNECTION = "postgres://username:password@host:port/dbname?sslmode=require"
+# или так
+# CONNECTION = "dbname=tsdb user=tsdbadmin password=secret host=host.com port=5432 sslmode=require"
+\end{lstlisting}
+
+Создать объект соединения и объект курсора можно так
+\begin{lstlisting}[
+style = ironpython,
+numbers = none
+]
+CONNECTION = "postgres://username:password@host:port/dbname"
+with psycopg2.connect(CONNECTION) as conn:
+	cursor = conn.cursor()
+	# use the cursor to interact with your database
+	# cursor.execute("SELECT * FROM table")
+\end{lstlisting}
+
+Создать таблицу можно так
+\begin{lstlisting}[
+style = ironpython,
+numbers = none
+]
+query_create_sensors_table = """CREATE TABLE sensors (
+	id SERIAL PRIMARY KEY,
+	type VARCHAR(50),
+	location VARCHAR(50)
+	);
+"""
+\end{lstlisting}
+
+Выполняем запрос, сохраняем изменения (commit), закрываем объект курсора
+\begin{lstlisting}[
+style = ironpython,
+numbers = none
+]
+cursor = conn.cursor()
+# see definition in Step 1
+cursor.execute(query_create_sensors_table)
+conn.commit()
+cursor.close()
+\end{lstlisting}
+
+Теперь можно создать \emph{гипертаблицу}
+\begin{lstlisting}[
+style = ironpython,
+numbers = none
+]
+# create sensor data hypertable
+query_create_sensordata_table = """CREATE TABLE sensor_data (
+	time TIMESTAMPTZ NOT NULL,
+	sensor_id INTEGER,
+	temperature DOUBLE PRECISION,
+	cpu DOUBLE PRECISION,
+	FOREIGN KEY (sensor_id) REFERENCES sensors (id)
+	);
+	"""
+
+# требуется указать имя таблицы, которую нужно преобразовать в гипертаблицу и имя столбца с временной меткой	
+query_create_sensordata_hypertable = "SELECT create_hypertable('sensor_data', by_range('time'));"
+
+cursor = conn.cursor()
+cursor.execute(query_create_sensordata_table)
+cursor.execute(query_create_sensordata_hypertable)
+# commit changes to the database to make changes persistent
+conn.commit()
+cursor.close()
+\end{lstlisting}
+
+Вставка данных
+\begin{lstlisting}[
+style = ironpython,
+numbers = none
+]
+sensors = [('a', 'floor'), ('a', 'ceiling'), ('b', 'floor'), ('b', 'ceiling')]
+cursor = conn.cursor()
+for sensor in sensors:
+	try:
+		cursor.execute(
+		    "INSERT INTO sensors (type, location) VALUES (%s, %s);",
+		    (sensor[0], sensor[1])
+		)
+	except (Exception, psycopg2.Error) as error:
+		print(error.pgerror)
+conn.commit()
+
+cursor = conn.cursor()
+query = "SELECT * FROM sensor_data;"
+cursor.execute(query)
+for row in cursor.fetchall():
+	print(row)
+cursor.close()
+\end{lstlisting}
+
+Если требуется получить список словарей, то можно сделать так
+\begin{lstlisting}[
+style = ironpython,
+numbers = none
+]
+cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+\end{lstlisting}
+
+\subsection{Установка TimescaleDB}
+
+Инструкции по установке TimescaleDB можно найти на странице \url{https://docs.timescale.com/self-hosted/latest/install/} (раздел <<Other deployment options>>)
+
+\subsubsection{На Linux}
+
+Если PostgreSQL уже установлен и требуется сохранить текущую версию, то во избежание ошибок, TimescaleDB следует собирать из исходников. В противном случае можно использовать инструкции на странице \url{https://docs.timescale.com/self-hosted/latest/install/installation-linux/}
+
+\subsubsection{На MacOS}
+
+Если PostgreSQL уже установлен и требуется сохранить текущую версию, то во избежание ошибок, TimescaleDB следует собирать из исходников. В противном случае можно использовать инструкции на странице \url{https://docs.timescale.com/self-hosted/latest/install/installation-macos/}
+
+\subsubsection{Сборка из исходников}
+
+
+\url{https://eax.me/timescaledb/}
+
+
+
 
 
 % Источники в "Газовой промышленности" нумеруются по мере упоминания 
